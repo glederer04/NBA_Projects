@@ -1,0 +1,375 @@
+---
+title: "FAS2026"
+author: "Gregory Lederer"
+date: "2025-11-25"
+output: html_document
+---
+
+All data as of morning of 11/25
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/gregorylederer/Desktop/NBA Project/FAS 2026") #set my working directory
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(glmnet)
+library(Metrics)
+library(ggplot2)
+```
+
+Dataset:
+
+All data was scraped from Basketball Reference into an Excel sheet in my directory and then read in. The directory did change when I placed all contents into a separate zip folder to submit. I could not find any MVP information on the API's provided, so I used Basketball Reference as that is what I am familiar with. I did not scrape straight from Basketball Reference into R as I know you can't scrape all of the data that I wanted at once without running into a firewall stopping you.
+
+The excel file with all my data is in the zip folder used to submit. Feel free to email me if there are any difficulties accessing any of my data (glederer@unc.edu).
+
+Other than the chunk below, and the set up chunk at the top, all code should run successfully end-to-end.
+
+I scraped data from the following places on Basketball Reference (2014-15 to 2024-25):
+- Per-Game Stats: Collected traditional box-score metrics (PTS, TRB, AST, STL, BLK, shooting splits, MP, G). Used to capture each player’s core production across all seasons.
+- Advanced Stats: Pulled efficiency and impact metrics (TS%, PER, WS, WS/48, BPM, VORP, usage rates). Included because advanced metrics are strongly tied to MVP voting and summarize overall value.
+- Team Metrics: Imported team results (W/L, win%, ORtg, DRtg, Net Rating). Added to provide essential context, since MVP candidates almost always come from top-performing teams.
+- MVP Voting Data: Gathered official vote shares and ranks for all players each season. Used both as model labels and to engineer historical “reputation” features.
+
+```{r}
+path <- '/Users/gregorylederer/Desktop/NBA Project/FAS 2026/FAS2026_Data.xlsx' #set for just my computer, path to my excel sheet with data
+#this path, and working directory path in set up chunk, may not match the naming of the zip folder I used to submit
+pergame <- read_excel(path = path, sheet = 1)
+advanced <- read_excel(path = path, sheet = 2)
+teams <- read_excel(path = path, sheet = 3)
+mvps <- read_excel(path = path, sheet = 4)
+pred_pergame <- read_excel(path = path, sheet = 5)
+pred_advanced <- read_excel(path = path, sheet = 6)
+pred_teams <- read_excel(path = path, sheet = 7)
+
+pergame <- pergame %>% rename(player_id = `Player-additional`)
+advanced <- advanced %>% rename(player_id = `Player-additional`)
+mvps <- mvps %>% rename(player_id = `Player-additional`)
+pred_pergame <- pred_pergame %>% rename(player_id = `Player-additional`)
+pred_advanced <- pred_advanced %>% rename(player_id = `Player-additional`)
+```
+
+```{r}
+team_lookup <- tibble::tibble(
+  team_name = c('Atlanta Hawks', 'Boston Celtics', 'Brooklyn Nets', 'Charlotte Hornets', 'Chicago Bulls', 'Cleveland Cavaliers', 'Dallas Mavericks', 'Denver Nuggets', 'Detroit Pistons', 'Golden State Warriors', 'Houston Rockets', 'Indiana Pacers', 'Los Angeles Clippers', 'Los Angeles Lakers', 'Memphis Grizzlies', 'Miami Heat', 'Milwaukee Bucks', 'Minnesota Timberwolves', 'New Orleans Pelicans', 'New York Knicks', 'Oklahoma City Thunder', 'Orlando Magic', 'Philadelphia 76ers', 'Phoenix Suns', 'Portland Trail Blazers', 'Sacramento Kings', 'San Antonio Spurs', 'Toronto Raptors', 'Utah Jazz', 'Washington Wizards'),
+  team_abbrev = c('ATL','BOS','BRK','CHO', 'CHI','CLE','DAL','DEN', 'DET','GSW','HOU','IND', 'LAC','LAL','MEM','MIA', 'MIL','MIN','NOP','NYK', 'OKC','ORL','PHI','PHO', 'POR','SAC','SAS','TOR', 'UTA','WAS')
+)
+
+team_metrics <- teams %>%
+  mutate(team_name = str_remove(Team, '\\*')) %>%
+  left_join(team_lookup, by = 'team_name') %>%
+  transmute(Season,Team = team_abbrev, W, L, win_pct = W / (W + L), ORtg, DRtg, NRtg)
+
+pred_team_metrics <- pred_teams %>%
+  mutate(team_name = str_remove(Team, '\\*')) %>%
+  left_join(team_lookup, by = c('team_name' = 'team_name')) %>%
+  transmute(Season,Team = team_abbrev, W, L, win_pct = W / (W + L), ORtg, DRtg, NRtg)
+
+player_stats_raw <- pergame %>%
+  select(Season, player_id, Player, Team, Age, Pos, G, GS, MP, PTS, TRB, AST, STL, BLK, TOV, `3P`, `3PA`, `3P%`, `FG%`, `FT%`) %>%
+  inner_join(advanced %>% select(Season, player_id, Player, Team, PER, `TS%`, `3PAr`, `FTr`, `ORB%`, `DRB%`, `TRB%`, `AST%`, `STL%`, `BLK%`, `TOV%`, `USG%`, OWS, DWS, WS, `WS/48`, OBPM, DBPM, BPM, VORP), by = c('Season','player_id','Player','Team'))
+```
+
+```{r}
+multi_codes <- c('2TM','3TM','4TM')
+
+primary_team <- pergame %>%
+  filter(!(Team %in% multi_codes)) %>%
+  group_by(Season, player_id) %>%
+  slice_max(order_by = G, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(Season, player_id, primary_team = Team)
+
+player_stats_clean <- player_stats_raw %>%
+  group_by(Season, player_id) %>%
+  mutate(has_multi = any(Team %in% multi_codes)) %>%
+  filter(
+    if (any(Team %in% multi_codes)) {
+      Team %in% multi_codes
+    } else {
+      G == max(G, na.rm = TRUE)
+    }
+  ) %>%
+  ungroup() %>%
+  left_join(primary_team, by = c('Season','player_id')) %>%
+  mutate(Team = if_else(Team %in% multi_codes & !is.na(primary_team), primary_team, Team)) %>%
+  select(-primary_team, -has_multi)
+
+player_with_team <- player_stats_clean %>%
+  left_join(team_metrics, by = c('Season','Team'))
+```
+
+```{r}
+mvp_labels <- mvps %>%
+  select(Season, player_id, mvp_rank = Rank, mvp_share = Share)
+
+training_data <- player_with_team %>%
+  left_join(mvp_labels, by = c('Season','player_id')) %>%
+  mutate(mvp_share = replace_na(mvp_share, 0)) %>%
+  filter(GS >= 50, MP >= 20)
+```
+
+```{r}
+pred_player_stats_raw <- pred_pergame %>%
+  select(Season, player_id, Player, Team, Age, Pos, G, GS, MP, PTS, TRB, AST, STL, BLK, TOV, `3P`, `3PA`, `3P%`, `FG%`, `FT%`) %>%
+  inner_join(pred_advanced %>% select(Season, player_id, Player, Team, PER, `TS%`, `3PAr`, `FTr`, `ORB%`, `DRB%`, `TRB%`, `AST%`, `STL%`, `BLK%`, `TOV%`, `USG%`, OWS, DWS, WS, `WS/48`, OBPM, DBPM, BPM, VORP), by = c('Season','player_id','Player','Team'))
+
+pred_primary_team <- pred_pergame %>%
+  filter(!(Team %in% multi_codes)) %>%
+  group_by(Season, player_id) %>%
+  slice_max(order_by = G, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(Season, player_id, primary_team = Team)
+
+pred_player_clean <- pred_player_stats_raw %>%
+  group_by(Season, player_id) %>%
+  mutate(has_multi = any(Team %in% multi_codes)) %>%
+  filter(
+    if (any(Team %in% multi_codes)) {
+      Team %in% multi_codes
+    } else {
+      G == max(G, na.rm = TRUE)
+    }
+  ) %>%
+  ungroup() %>%
+  left_join(pred_primary_team, by = c('Season','player_id')) %>%
+  mutate(Team = if_else(Team %in% multi_codes & !is.na(primary_team), primary_team, Team)) %>%
+  select(-primary_team, -has_multi) %>%
+  left_join(pred_team_metrics, by = c('Season','Team'))
+```
+
+```{r}
+mvps <- mvps %>%
+  mutate(season_start = as.integer(substr(Season, 1, 4)))
+
+training_data <- training_data %>%
+  mutate(season_start = as.integer(substr(Season, 1, 4)))
+
+mvp_history <- mvps %>%
+  arrange(player_id, season_start) %>%
+  group_by(player_id) %>%
+  mutate(
+    mvp_share = Share,
+    mvp_rank = Rank,
+    mvp_win = if_else(mvp_rank == 1, 1L, 0L),
+    mvp_top3 = if_else(!is.na(mvp_rank) & mvp_rank <= 3, 1L, 0L),
+    cum_share = cumsum(replace_na(mvp_share, 0)),
+    cum_wins = cumsum(mvp_win),
+    cum_top3 = cumsum(mvp_top3),
+    prev_mvp_share = lag(mvp_share, default = 0),
+    prev_cum_mvp_share = lag(cum_share, default = 0),
+    prev_cum_mvp_wins = lag(cum_wins, default = 0),
+    prev_cum_top3 = lag(cum_top3, default = 0)
+  ) %>%
+  ungroup() %>%
+  select(Season, season_start, player_id, prev_mvp_share, prev_cum_mvp_share, prev_cum_mvp_wins, prev_cum_top3)
+
+training_data_with_history <- training_data %>%
+  left_join(mvp_history, by = c('Season', 'season_start', 'player_id')) %>%
+  mutate(prev_mvp_share = replace_na(prev_mvp_share, 0),
+    prev_cum_mvp_share = replace_na(prev_cum_mvp_share, 0),
+    prev_cum_mvp_wins = replace_na(prev_cum_mvp_wins, 0),
+    prev_cum_top3 = replace_na(prev_cum_top3, 0)
+  )
+```
+
+```{r}
+zsafe <- function(x) {
+  m <- mean(x, na.rm = TRUE)
+  s <- sd(x, na.rm = TRUE)
+  if (is.na(s) || s == 0) return(rep(0, length(x)))
+  (x - m) / s
+}
+
+training_data_with_history <- training_data_with_history %>%
+  mutate(
+    z_prev_mvp_share = zsafe(prev_mvp_share),
+    z_prev_cum_mvp_share = zsafe(prev_cum_mvp_share),
+    z_prev_cum_mvp_wins = zsafe(prev_cum_mvp_wins),
+    z_prev_cum_top3 = zsafe(prev_cum_top3),
+    mvp_rep_index =
+      0.15 * z_prev_cum_mvp_share +
+      0.60 * z_prev_mvp_share +
+      0.10 * z_prev_cum_mvp_wins +
+      0.15 * z_prev_cum_top3
+  ) %>%
+  mutate(
+    has_prev_votes = as.integer(prev_cum_mvp_share > 0 | prev_mvp_share > 0)
+  )
+```
+
+```{r}
+feature_cols <- c('win_pct', 'VORP', 'mvp_rep_index', 'has_prev_votes', 'TS%', 'FT%')
+
+model_df <- training_data_with_history %>%
+  select(Season, player_id, Player, Team, mvp_share, all_of(feature_cols)) %>%
+  drop_na(mvp_share, all_of(feature_cols))
+
+test_seasons <- c('2023-24')
+
+train_df <- model_df %>% filter(!(Season %in% test_seasons))
+test_df <- model_df %>% filter(Season %in% test_seasons)
+
+x_train <- as.matrix(train_df %>% select(all_of(feature_cols)))
+y_train <- train_df$mvp_share
+
+x_test <- as.matrix(test_df %>% select(all_of(feature_cols)))
+y_test <- test_df$mvp_share
+
+set.seed(123)
+
+mvp_fit <- cv.glmnet(x_train, y_train, alpha = 0.5, family = 'gaussian', nfolds = 10)
+
+mvp_fit$lambda.min
+
+test_df <- test_df %>%
+  mutate(
+    pred_share = as.numeric(predict(mvp_fit, newx = x_test, s = 'lambda.min')),
+    pred_share = pmax(pred_share, 0)
+  )
+
+rmse_test <- rmse(test_df$mvp_share, test_df$pred_share)
+mae_test <- mae(test_df$mvp_share, test_df$pred_share)
+
+rmse_test
+mae_test
+
+cor(test_df$mvp_share, test_df$pred_share)
+
+coefs <- coef(mvp_fit, s = 'lambda.min')
+coefs_df <- data.frame(
+  feature = coefs@Dimnames[[1]],
+  coefficient = as.numeric(coefs)
+) %>%
+  filter(feature != '(Intercept)') %>%
+  arrange(desc(abs(coefficient)))
+
+coefs_df
+
+coefs_df %>%
+  mutate(feature = reorder(feature, abs(coefficient))) %>%
+  ggplot(aes(x = feature, y = coefficient)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  labs(
+    title = 'GLMNET Coefficient Importance',
+    x = 'Feature',
+    y = 'Coefficient (lambda.min)'
+  ) +
+  theme_minimal()
+```
+
+```{r}
+corr_test <- cor(test_df$mvp_share, test_df$pred_share)
+
+perf_plot <- ggplot(test_df, aes(x = mvp_share, y = pred_share)) +
+  geom_abline(slope = 1, intercept = 0, color = '#FF4B4B', linetype = 'dashed', linewidth = 1) +
+  geom_point(shape = 21, size = 2.5, fill = '#FF4B4B', color = 'white', alpha = 0.75) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(title = 'Actual vs Predicted MVP Voting Share',
+       subtitle = '(2023-24 Test Season)',
+       x = 'Actual MVP Share',
+       y = 'Predicted MVP Share') +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.background = element_rect(fill = '#111827', color = NA),
+    panel.background = element_rect(fill = '#111827', color = NA),
+    panel.grid.major = element_line(color = '#374151'),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(color = 'white', face = 'bold'),
+    axis.text = element_text(color = 'white'),
+    plot.title = element_text(color = 'white', face = 'bold', hjust = 0.5, size = 12),
+    plot.subtitle = element_text(color = 'white', face = 'bold', hjust = 0.5, size = 12)
+  )
+
+perf_plot
+#ggsave(filename = 'plot.png')
+```
+
+```{r}
+rep_stats <- training_data_with_history %>%
+  summarise(
+    mu_prev_mvp_share = mean(prev_mvp_share, na.rm = TRUE),
+    sd_prev_mvp_share = sd(prev_mvp_share, na.rm = TRUE),
+    mu_prev_cum_mvp_share = mean(prev_cum_mvp_share, na.rm = TRUE),
+    sd_prev_cum_mvp_share = sd(prev_cum_mvp_share, na.rm = TRUE),
+    mu_prev_cum_mvp_wins = mean(prev_cum_mvp_wins, na.rm = TRUE),
+    sd_prev_cum_mvp_wins = sd(prev_cum_mvp_wins, na.rm = TRUE),
+    mu_prev_cum_top3 = mean(prev_cum_top3, na.rm = TRUE),
+    sd_prev_cum_top3 = sd(prev_cum_top3, na.rm = TRUE)
+  )
+
+scale_with <- function(x, mu, sd) {
+  if (is.na(sd) || sd == 0) {
+    return(rep(0, length(x)))
+  }
+  (x - mu) / sd
+}
+
+mvp_history_pred <- mvps %>%
+  arrange(player_id, season_start) %>%
+  group_by(player_id) %>%
+  summarise(
+    prev_mvp_share = dplyr::last(Share, order_by = season_start),
+    prev_cum_mvp_share = sum(Share, na.rm = TRUE),
+    prev_cum_mvp_wins = sum(Rank == 1, na.rm = TRUE),
+    prev_cum_top3 = sum(!is.na(Rank) & Rank <= 3, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+pred_player_with_history <- pred_player_clean %>%
+  filter(MP >= 20 & GS > 12) %>%
+  left_join(
+    mvp_history_pred,
+    by = 'player_id'
+  ) %>%
+  mutate(
+    prev_mvp_share = replace_na(prev_mvp_share, 0),
+    prev_cum_mvp_share = replace_na(prev_cum_mvp_share, 0),
+    prev_cum_mvp_wins = replace_na(prev_cum_mvp_wins, 0),
+    prev_cum_top3 = replace_na(prev_cum_top3, 0)
+  ) %>%
+  mutate(
+    z_prev_mvp_share = scale_with(prev_mvp_share, rep_stats$mu_prev_mvp_share, rep_stats$sd_prev_mvp_share),
+    z_prev_cum_mvp_share = scale_with(prev_cum_mvp_share, rep_stats$mu_prev_cum_mvp_share, rep_stats$sd_prev_cum_mvp_share),
+    z_prev_cum_mvp_wins = scale_with(prev_cum_mvp_wins, rep_stats$mu_prev_cum_mvp_wins, rep_stats$sd_prev_cum_mvp_wins),
+    z_prev_cum_top3 = scale_with(prev_cum_top3, rep_stats$mu_prev_cum_top3, rep_stats$sd_prev_cum_top3),
+    mvp_rep_index =
+      0.15 * z_prev_cum_mvp_share +
+      0.60 * z_prev_mvp_share +
+      0.10 * z_prev_cum_mvp_wins +
+      0.15 * z_prev_cum_top3
+  ) %>%
+  mutate(
+    has_prev_votes = as.integer(prev_cum_mvp_share > 0 | prev_mvp_share > 0)
+  )
+
+x_pred <- as.matrix(pred_player_with_history %>% select(all_of(feature_cols)))
+
+pred_results_raw <- pred_player_with_history %>%
+  mutate(
+    pred_share = as.numeric(predict(mvp_fit, newx = x_pred, s = 'lambda.min')),
+    pred_share = pmax(pred_share, 0)
+  ) %>%
+  select(Season, player_id, Player, Team, pred_share)
+
+pred_results <- pred_results_raw %>%
+  group_by(Season) %>%
+  mutate(
+    total_pred_share = sum(pred_share, na.rm = TRUE),
+    mvp_prob = if_else(total_pred_share > 0, pred_share / total_pred_share, 0)
+  ) %>%
+  ungroup() %>%
+  arrange(Season, desc(mvp_prob))
+
+final_pred <- pred_results %>%
+  select(player_name = Player, probability = mvp_prob) %>%
+  filter(probability>0)
+#write.csv(final_pred, 'predictions.csv', row.names = FALSE)
+```
+
