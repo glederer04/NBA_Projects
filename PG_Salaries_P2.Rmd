@@ -1,0 +1,792 @@
+---
+title: "A Closer Look at NBA Point Guards and What Impacts Their Salary"
+author: "Gregory Lederer"
+output:
+  rmdformats::readthedown
+---
+
+<div style="text-align: left; font-size: 48px; font-weight: bold; margin-top: -5px; margin-bottom: 10px;">
+  Part 2
+</div>
+<style>
+h1 {
+  font-size: 24px;
+  font-weight: bold;
+  text-decoration: underline;
+  margin-bottom: 8px;
+  margin-top: 30px;
+}
+h2 {
+  font-size: 20px;
+  font-weight: bold;
+  text-decoration: underline;
+  margin-bottom: 6px;
+  margin-top: 24px;
+}
+h1 + p, h2 + p {
+  margin-top: 4px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/gregorylederer/Desktop/NBA Project/PG Salary")
+```
+
+```{r, include=FALSE}
+library(MASS)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(htmltools)
+library(rvest)
+library(treemapify)
+library(scales)
+library(readxl)
+library(stringi)
+library(glue)
+library(car)
+library(rsample)
+library(purrr)
+library(broom)
+library(caret)
+library(gridExtra)
+library(rmdformats)
+library(prettydoc)
+library(gt)
+library(gtExtras)
+library(shiny)
+library(DT)
+library(reactable)
+```
+
+```{r, include=FALSE}
+salaries_data <- read.csv('24-25 Salaries Data.csv')
+pergame_data <- read.csv('24-25 Pergame Data.csv')
+advanced_data <- read.csv('24-25 Advanced Data.csv')
+pbp_data <- read.csv('24-25 PBP Data.csv')
+shooting_data <- read.csv('24-25 Shooting Data.csv')
+
+shooting_data20 <- read.csv('19-20 Shooting Data.csv')
+shooting_data21 <- read.csv('20-21 Shooting Data.csv')
+shooting_data22 <- read.csv('21-22 Shooting Data.csv')
+shooting_data23 <- read.csv('22-23 Shooting Data.csv')
+shooting_data24 <- read.csv('23-24 Shooting Data.csv')
+
+salaries_24 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/PlayerSalaries.xlsx', sheet = 1)
+salaries_23 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/PlayerSalaries.xlsx', sheet = 2)
+salaries_22 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/PlayerSalaries.xlsx', sheet = 3)
+salaries_21 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/PlayerSalaries.xlsx', sheet = 4)
+salaries_20 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/PlayerSalaries.xlsx', sheet = 5)
+
+advanced_data20 <- read.csv('19-20 Advanced Data.csv')
+advanced_data21 <- read.csv('20-21 Advanced Data.csv')
+advanced_data22 <- read.csv('21-22 Advanced Data.csv')
+advanced_data23 <- read.csv('22-23 Advanced Data.csv')
+advanced_data24 <- read.csv('23-24 Advanced Data.csv')
+
+nba_data_25 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 1)
+nba_data_24 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 2)
+nba_data_23 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 3)
+nba_data_22 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 4)
+nba_data_21 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 5)
+nba_data_20 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PG Salary/OtherPlayerStats.xlsx', sheet = 6)
+```
+
+```{r, include=FALSE}
+salaries_20 <- salaries_20 %>% mutate(Year = "2019-20") %>% rename(Player = player)
+salaries_21 <- salaries_21 %>% mutate(Year = "2020-21") %>% rename(Player = player)
+salaries_22 <- salaries_22 %>% mutate(Year = "2021-22") %>% rename(Player = player)
+salaries_23 <- salaries_23 %>% mutate(Year = "2022-23") %>% rename(Player = player)
+salaries_24 <- salaries_24 %>% mutate(Year = "2023-24") %>% rename(Player = player)
+salaries_data <- salaries_data %>% mutate(Year = "2024-25")
+normalize_names <- function(df) {
+  df %>% mutate(Player = stri_trans_general(Player, "Latin-ASCII"))
+}
+salaries_20 <- normalize_names(salaries_20)
+salaries_21 <- normalize_names(salaries_21)
+salaries_22 <- normalize_names(salaries_22)
+salaries_23 <- normalize_names(salaries_23)
+salaries_24 <- normalize_names(salaries_24)
+salaries_data <- normalize_names(salaries_data)
+
+shooting_data20_pgs <- shooting_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data21_pgs <- shooting_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data22_pgs <- shooting_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data23_pgs <- shooting_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data24_pgs <- shooting_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data_pgs <- shooting_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_shooting <- bind_rows(
+  shooting_data20_pgs,
+  shooting_data21_pgs,
+  shooting_data22_pgs,
+  shooting_data23_pgs,
+  shooting_data24_pgs,
+  shooting_data_pgs
+)
+all_pg_shooting <- normalize_names(all_pg_shooting)
+
+salaries_all_yrs <- bind_rows(
+  salaries_20 %>% dplyr::select(Player, Year, salary),
+  salaries_21 %>% dplyr::select(Player, Year, salary),
+  salaries_22 %>% dplyr::select(Player, Year, salary),
+  salaries_23 %>% dplyr::select(Player, Year, salary),
+  salaries_24 %>% dplyr::select(Player, Year, salary),
+  salaries_data %>% mutate(`X2024.25` = as.numeric(`X2024.25`)) %>% dplyr::select(Player, Year, salary=`X2024.25`)
+)
+
+all_pg_shooting <- all_pg_shooting %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+
+all_pg_shooting <- normalize_names(all_pg_shooting)
+
+nba_data_25 <- nba_data_25 %>% mutate(Year = '2024-25', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_24 <- nba_data_24 %>% mutate(Year = '2023-24', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_23 <- nba_data_23 %>% mutate(Year = '2022-23', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_22 <- nba_data_22 %>% mutate(Year = '2021-22', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_21 <- nba_data_21 %>% mutate(Year = '2020-21', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_20 <- nba_data_20 %>% mutate(Year = '2019-20', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+all_nba_data <- rbind(nba_data_25, nba_data_24, nba_data_23, nba_data_22, nba_data_21, nba_data_20) %>% rename(Player = PLAYER)
+all_nba_data <- normalize_names(all_nba_data)
+
+advanced_data20_pgs <- advanced_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data21_pgs <- advanced_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data22_pgs <- advanced_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data23_pgs <- advanced_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data24_pgs <- advanced_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data_pgs <- advanced_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_advanced <- bind_rows(
+  advanced_data20_pgs,
+  advanced_data21_pgs,
+  advanced_data22_pgs,
+  advanced_data23_pgs,
+  advanced_data24_pgs,
+  advanced_data_pgs
+)
+all_pg_advanced <- all_pg_advanced %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+all_pg_advanced_salaries <- all_pg_advanced %>% filter(!is.na(salary))
+
+adv_selected1 <- all_pg_advanced_salaries %>%
+  group_by(Player, Year) %>%
+  slice_max(G, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(Player, Year, salary, TS., X3PAr, FTr, ORB., DRB., TRB., AST., STL., BLK., TOV., USG., OBPM, DBPM, BPM, Age)
+shooting_selected1 <- all_pg_shooting %>%
+  group_by(Player, Year) %>%
+  slice_max(G, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(Player, Year, FG. = `FG.`, Dist., FGA.2p, FGA.0.3 = `FGA.0.3`, FGA.3.10 = `FGA.3.10`, 
+         FGA.10.16 = `FGA.10.16`, FGA.16.3P = `FGA.16.3P`, FGA.3P, 
+         FG.2p, FG.0.3 = `FG.0.3`, FG.3.10 = `FG.3.10`, FG.10.16 = `FG.10.16`, 
+         FG.16.3P = `FG.16.3P`, FG.3P, FG.2P_ast, FG.3P_ast, Corner3PA., Corner3P.)
+model_data1 <- all_nba_data %>%
+  inner_join(adv_selected1, by = c("Player", "Year")) %>%
+  inner_join(shooting_selected1, by = c("Player", "Year")) %>%
+  unique() %>%
+  mutate(across(.cols = -c(Player, Year, TEAM), .fns = ~ as.numeric(.)))
+
+#-- first model, raw salary, with outliers
+model_data1.1 <- model_data1 %>% drop_na()
+set.seed(123)
+n <- nrow(model_data1.1)
+train_index <- sample(seq_len(n), size = 0.8 * n)
+train_data <- model_data1.1[train_index, ]
+test_data <- model_data1.1[-train_index, ]
+model <- lm(salary~OBPM+Age*USG.+POSS+FGA.16.3P+FGA.2p+FTr+FG.3.10+FG.3P+FG.2P_ast+FG.2p+BLK.+TOV., data = train_data)
+test_data$pred_salary <- pmax(0, predict(model, newdata = test_data))
+#-- second model, raw salary, no outliers
+influence <- influence.measures(model)
+train_data2 <- train_data
+test_data2 <- test_data
+train_data2$leverage <- hatvalues(model)
+train_data2$cooks_d <- cooks.distance(model)
+train_data2$std_resid <- rstandard(model)
+leverage_cutoff <- 2 * (length(model$coefficients)) / nrow(train_data2)
+cooks_cutoff <- 4 / nrow(train_data2)
+train_data_clean <- train_data2 %>%
+  filter(leverage < leverage_cutoff,
+         cooks_d < cooks_cutoff,
+         abs(std_resid) < 3)
+model_clean <- lm(salary~OBPM+Age*USG.+POSS+FGA.16.3P+FGA.2p+FTr+FG.3.10+FG.3P+FG.2P_ast+FG.2p+BLK.+TOV., data = train_data_clean)
+test_data2$pred_salary_clean <- pmax(0, predict(model_clean, newdata = test_data2))
+#-- third model, log salary, outliers
+model_data2 <- model_data1 %>% drop_na() %>% mutate(salary = log(salary))
+n3 <- nrow(model_data2)
+train_index3 <- sample(seq_len(n3), size = 0.8 * n3)
+train_data3 <- model_data2[train_index3, ]
+test_data3 <- model_data2[-train_index3, ]
+model2 <- lm(salary ~ POSS + Age + USG. + DBPM + FGA.0.3 + ORB. + FGA.3.10 + Dist. + FTr + FG.3.10, data = train_data3)
+test_data3$pred_salary <- pmax(0, predict(model2, newdata = test_data3))
+#-- fourth model, log salary, no outliers
+train_data3_diag <- train_data3 %>%
+  mutate(
+    leverage = hatvalues(model2),
+    cooks_d = cooks.distance(model2),
+    std_resid = rstandard(model2)
+  )
+leverage_thresh <- 2 * (length(coef(model2)) / nrow(train_data3_diag))
+cooks_thresh <- 4 / nrow(train_data3_diag)
+train_data3_clean <- train_data3_diag %>%
+  filter(leverage < leverage_thresh,
+         cooks_d < cooks_thresh,
+         abs(std_resid) < 3)
+model2_clean <- lm(salary ~ log(POSS) + Age * USG. + DBPM + FGA.0.3 + ORB. + FGA.3.10 + FG.3.10 + FTr+ Dist., data = train_data3_clean)
+test_data3$pred_salary_clean <- pmax(0, predict(model2_clean, newdata = test_data3))
+#-- fifth model, percentile, outliers
+model_data1.2 <- model_data1 %>%
+  drop_na() %>%
+  mutate(salary_ptile = percent_rank(salary))
+n2 <- nrow(model_data1.2)
+train_index4 <- sample(seq_len(n2), size = 0.8 * n2)
+train_data4 <- model_data1.2[train_index4, ]
+test_data4 <- model_data1.2[-train_index4, ]
+model_ptile <- lm(salary_ptile~POSS+Age+USG.+DBPM+FGA.3.10+FG.3.10+BLK.+AST., data = train_data4)
+test_data4$pred_salary_ptile <- predict(model_ptile, newdata = test_data4)
+test_data4$pred_salary_ptile <- test_data4$pred_salary_ptile * 100
+test_data4$pred_salary_ptile <- pmin(pmax(test_data4$pred_salary_ptile, 0), 100)
+#-- sixth model, percentile, no outliers
+train_data4_diag <- train_data4 %>%
+  mutate(
+    leverage = hatvalues(model_ptile),
+    cooks_d = cooks.distance(model_ptile),
+    std_resid = rstandard(model_ptile)
+  )
+leverage_thresh <- 2 * (length(coef(model_ptile)) / nrow(train_data4_diag))
+cooks_thresh <- 4 / nrow(train_data4_diag)
+train_data4_clean <- train_data4_diag %>%
+  filter(
+    leverage < leverage_thresh,
+    cooks_d < cooks_thresh,
+    abs(std_resid) < 3,
+  )
+model_ptile_clean <- lm(salary_ptile ~ POSS + Age + USG. + DBPM + FGA.3.10 + FG.3.10 + BLK. + AST., data = train_data4_clean)
+test_data4$pred_salary_ptile_clean <- predict(model_ptile_clean, newdata = test_data4)
+test_data4$pred_salary_ptile_clean <- test_data4$pred_salary_ptile_clean * 100
+test_data4$pred_salary_ptile_clean <- pmin(pmax(test_data4$pred_salary_ptile_clean, 0), 100)
+#-- player diffs
+player_diffs <- test_data3 %>%
+  mutate(
+    actual_salary = exp(salary),
+    predicted_salary = exp(pred_salary_clean),
+    diff = (actual_salary - predicted_salary)
+  ) %>%
+  arrange(desc(diff)) %>%
+  select(Player, Year, Age, actual_salary, predicted_salary, diff)
+#-- interactive data
+interactive_data <- bind_rows(
+  train_data3_clean %>% mutate(set = "Train"),
+  test_data3 %>% mutate(set = "Test")
+)
+interactive_data <- interactive_data %>%
+  mutate(
+    pred_salary = exp(predict(model2_clean, newdata = interactive_data)),
+    actual_salary = exp(salary),
+    salary_diff = actual_salary - pred_salary,
+    evaluation = case_when(
+      salary_diff > 5000000 ~ "Overpaid",
+      salary_diff < -5000000 ~ "Underpaid",
+      TRUE ~ "Accurate"
+    ),
+    player_year = paste(Player, Year)
+  )
+interactive_table <- interactive_data %>%
+  select(Player, Year, actual_salary, pred_salary, evaluation)
+```
+
+# Goal
+<span style="font-size: 16px;">
+In this section, I aim to build a predictive model that estimates a point guard’s salary using only their on-court statistics from that season. The goal is to identify players who may be overpaid or underpaid relative to their production and explore how well statistical performance alone can explain salary differences. While I recognize that salary is influenced by many external factors—such as team success, roster construction, and player reputation—this model will focus only on what I’ve been analyzing throughout [Part 1](https://glederer04.github.io/PG_Salaries_P1.html). This decision aligns with the scope of data I have access to and allows for a more controlled evaluation of point guard value.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+Ultimately, this is meant to be one of several small, focused NBA projects where I build and apply analytics tools to better understand trends around player evaluation. I’m excited to see what insights emerge and would love any feedback on how to make these models stronger or more informative. My contact information and past work can be found on my [personal website](https://glederer04.github.io/#nba-projects).
+</span>
+<br>
+
+# Data Preperation and Modeling Approach
+<span style="font-size: 16px;">
+To begin the modeling process, I continued using the same player-level data from Part 1, pulling from [Basketball Reference](https://www.basketball-reference.com). I filtered the data down to point guards only from the 2019–20 through 2024–25 seasons, applying minimum thresholds for games played and minutes to ensure only reliable samples were included. Each player's stats were aggregated per season, and I joined shooting, advanced, and overall player performance metrics into a single dataset. These included stats like usage rate, true shooting percentage, assist rate, shot location efficiency, and more, all of which were featured in my earlier analysis.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+The models are trained using a standard 80/20 split, where 80% of the data is used for training and the remaining 20% for testing. My modeling strategy is based on linear regression, using season-level data to predict a player’s salary for that year. I experimented with three versions: one predicting **raw salary** directly, another using the **log-transformed salary**, and another using **percentile rank** of salary as the target,. To improve robustness, I cleaned the training set by removing high-leverage and high-influence points, as well as extreme outliers based on standardized residuals and Cook’s distance.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+For each model I tested, I used subset selection techniques—both forward and backward—to identify combinations of predictors that performed best using *adjusted R²* and *mean absolute error (MAE)* as my primary evaluation metrics. In addition to traditional summary statistics, I assessed model quality visually with residual plots and predicted vs. actual comparisons. These steps helped ensure that the final model wasn’t overfit and retained strong interpretability while still explaining as much variation in salary as possible.
+</span>
+<br>
+
+# Model 1 - Raw Salary
+<span style="font-size: 16px;">
+The first model I built aimed to predict raw annual salary using traditional linear regression and player-level stats from each season. I included a range of shooting and advanced metrics based on their earlier correlation with salary and then used backward and forward selection to settle on a final formula. The resulting model, prior to cleaning for outliers, is shown below:
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+coefs <- coef(model) / 100000
+terms <- names(coefs)
+pretty_names <- c(
+  "(Intercept)" = "<span style='color: black; font-weight: bold;'>Intercept</span>",
+  "OBPM" = "<span style='color: black; font-weight: bold;'>OBPM</span>",
+  "Age" = "<span style='color: black; font-weight: bold;'>Age</span>",
+  "USG." = "<span style='color: black; font-weight: bold;'>USG%</span>",
+  "POSS" = "<span style='color: black; font-weight: bold;'>POSS</span>",
+  "FGA.16.3P" = "<span style='color: black; font-weight: bold;'>FGA% (16ft–3P)</span>",
+  "FGA.2p" = "<span style='color: black; font-weight: bold;'>FGA% (2PT)</span>",
+  "FTr" = "<span style='color: black; font-weight: bold;'>FTAr</span>",
+  "FG.3.10" = "<span style='color: black; font-weight: bold;'>FG% (3–10 ft)</span>",
+  "FG.3P" = "<span style='color: black; font-weight: bold;'>FG% (3PT)</span>",
+  "FG.2P_ast" = "<span style='color: black; font-weight: bold;'>%Assisted 2PT</span>",
+  "FG.2p" = "<span style='color: black; font-weight: bold;'>FG% (2PT)</span>",
+  "BLK." = "<span style='color: black; font-weight: bold;'>BLK%</span>",
+  "TOV." = "<span style='color: black; font-weight: bold;'>TOV%</span>",
+  "Age:USG." = "<span style='color: black; font-weight: bold;'>Age × USG%</span>"
+)
+formatted_terms <- map2_chr(coefs, terms, ~ {
+  stat <- pretty_names[.y]
+  value <- round(.x, 3)
+  if (.y == "(Intercept)") {
+    glue::glue("<span style='color: #b22222; font-style: italic;'>{value}</span>")
+  } else {
+    sign <- ifelse(value >= 0, "+", "–")
+    glue::glue("<span style='color: #b22222; font-style: italic;'> {sign} {abs(value)} ×</span> {stat}")
+  }
+})
+line_breaks <- ceiling(seq_along(formatted_terms) / 4)
+equation_lines <- split(formatted_terms, line_breaks)
+equation_lines <- map_chr(equation_lines, ~ paste(.x, collapse = " "))
+equation_block <- paste(equation_lines, collapse = "<br>")
+cat(glue::glue('
+<div style="background-color: #f5f5f5; padding: 14px 20px; border-radius: 6px; text-align: center; font-size: 16px; font-family: sans-serif;">
+  <span style="color: black; font-weight: bold;">Salary</span><span style="color: #b22222; font-style: italic;"> =</span>{equation_block}
+</div>
+'))
+```
+<div style="text-align: center;">*Coefficients rounded to predict Salary in $100,000s*</div>
+<br>
+<span style="font-size: 16px;">
+Before removing outliers, the model achieved a mean absolute error of *`r round(mean(abs(test_data$salary - test_data$pred_salary)), 0) %>% scales::dollar()`* on the test set and an adjusted R² of *`r round(summary(model)$adj.r.squared, 3)`*. After filtering out high-leverage and high-influence observations using standardized residuals and Cook’s distance, the cleaned model showed a slightly higher mean absolute error of *`r round(mean(abs(test_data2$salary - test_data2$pred_salary_clean)), 0) %>% scales::dollar()`*, but improved fit with an adjusted R² of *`r round(summary(model_clean)$adj.r.squared, 3)`*. This suggests the refined model better explains the overall variance in the data despite being slightly less accurate on unseen examples. The cleaned model more effectively captured key statistical relationships, especially those involving **Offensive Box Plus-Minus (OBPM)**, **Usage Rate (USG%)**, and **three-point shooting efficiency**, while reducing the influence of extreme cases. For reference the equation to the model without outliers is below:
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+coefs <- coef(model_clean) / 100000
+terms <- names(coefs)
+pretty_names <- c(
+  "(Intercept)" = "<span style='color: black; font-weight: bold;'>Intercept</span>",
+  "OBPM" = "<span style='color: black; font-weight: bold;'>OBPM</span>",
+  "Age" = "<span style='color: black; font-weight: bold;'>Age</span>",
+  "USG." = "<span style='color: black; font-weight: bold;'>USG%</span>",
+  "POSS" = "<span style='color: black; font-weight: bold;'>POSS</span>",
+  "FGA.16.3P" = "<span style='color: black; font-weight: bold;'>FGA% (16ft–3P)</span>",
+  "FGA.2p" = "<span style='color: black; font-weight: bold;'>FGA% (2PT)</span>",
+  "FTr" = "<span style='color: black; font-weight: bold;'>FTAr</span>",
+  "FG.3.10" = "<span style='color: black; font-weight: bold;'>FG% (3–10 ft)</span>",
+  "FG.3P" = "<span style='color: black; font-weight: bold;'>FG% (3PT)</span>",
+  "FG.2P_ast" = "<span style='color: black; font-weight: bold;'>%Assisted 2PT</span>",
+  "FG.2p" = "<span style='color: black; font-weight: bold;'>FG% (2PT)</span>",
+  "BLK." = "<span style='color: black; font-weight: bold;'>BLK%</span>",
+  "TOV." = "<span style='color: black; font-weight: bold;'>TOV%</span>",
+  "Age:USG." = "<span style='color: black; font-weight: bold;'>Age × USG%</span>"
+)
+formatted_terms <- map2_chr(coefs, terms, ~ {
+  stat <- pretty_names[.y]
+  value <- round(.x, 3)
+  if (.y == "(Intercept)") {
+    glue::glue("<span style='color: #b22222; font-style: italic;'>{value}</span>")
+  } else {
+    sign <- ifelse(value >= 0, "+", "–")
+    glue::glue("<span style='color: #b22222; font-style: italic;'> {sign} {abs(value)} ×</span> {stat}")
+  }
+})
+line_breaks <- ceiling(seq_along(formatted_terms) / 4)
+equation_lines <- split(formatted_terms, line_breaks)
+equation_lines <- map_chr(equation_lines, ~ paste(.x, collapse = " "))
+equation_block <- paste(equation_lines, collapse = "<br>")
+cat(glue::glue('
+<div style="background-color: #f5f5f5; padding: 14px 20px; border-radius: 6px; text-align: center; font-size: 16px; font-family: sans-serif;">
+  <span style="color: black; font-weight: bold;">Salary</span><span style="color: #b22222; font-style: italic;"> =</span>{equation_block}
+</div>
+'))
+```
+<div style="text-align: center;">*Coefficients rounded to predict Salary in $100,000s*</div>
+<br>
+<span style="font-size: 16px;">
+While the cleaned model sacrifices a small amount of predictive accuracy on unseen data, it offers a clearer and more statistically consistent view of how specific metrics relate to salary. The relationship between predicted and actual salary values is visualized below to further illustrate the model’s performance.
+</span>
+<br>
+<br>
+```{r, results='asis', echo=FALSE}
+cat('<div style="text-align: center;">')
+ggplot(test_data2, aes(x = salary, y = pred_salary_clean)) +
+  geom_point(alpha = 0.65, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "firebrick4", linewidth = 0.8) +
+  scale_x_continuous(labels = scales::dollar_format(scale = 1e-6, suffix = "M")) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 1e-6, suffix = "M")) +
+  labs(
+    title = "Predicted vs Actual Salary (Cleaned Model)",
+    subtitle = "Dashed line represents perfect prediction",
+    x = "Actual Salary",
+    y = "Predicted Salary"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.title.x = element_text(face = "bold", size = 12),
+    axis.title.y = element_text(face = "bold", size = 12),
+    axis.text = element_text(size = 10),
+    plot.background = element_rect(fill = '#f5f5f5', color = '#f5f5f5'),
+    panel.background = element_rect(fill = '#f5f5f5', color = '#f5f5f5')
+  )
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+The plot above shows that the cleaned model does a solid job predicting player salary based solely on statistical output, particularly for some of those mid-range contracts. While some variance remains—especially among the league’s lower earning point guards—it’s clear the model captures many of the core factors driving compensation. One limitation, however, is that the model predicts a salary of $0 for a small number of players. This likely reflects statistical profiles that fall well outside the norm, while not being considered outliers, and may warrant a closer look to confirm whether those players are true point guards and what specific metrics are driving their predicted value so low. This version provides a useful benchmark for comparison as I now explore alternate modeling strategies, starting with a log-transformed salary approach.
+</span>
+<br>
+
+# Model 2 - Logarithmic Salary
+<span style="font-size: 16px;">
+For the second modeling approach, I applied a natural log transformation to player salary in an effort to reduce skew and stabilize the variance in residuals. NBA salary data is highly right-skewed due to the presence of several max-level contracts, which can heavily influence linear regression models. By modeling *log(salary)* instead of raw salary, the regression better captures proportional changes and is less sensitive to extreme outliers. This is a common approach when dealing with salary, income, or other growth-based financial variables.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+The uncleaned model achieved a mean absolute error of *`r scales::dollar(round(mean(abs(exp(test_data3$salary) - exp(test_data3$pred_salary))), 0))`* on the test set. After removing high-leverage and high-influence points using residual diagnostics, the cleaned model improved performance with a reduced error of *`r scales::dollar(round(mean(abs(exp(test_data3$salary) - exp(test_data3$pred_salary_clean))), 0))`*. It’s important to note that while the model predicts *log(salary)*, I exponentiate the predictions to convert them back to actual salary values for evaluation and comparison.
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+coefs <- coef(model2_clean)
+terms <- names(coefs)
+pretty_names <- c(
+  "(Intercept)" = "<span style='color: black; font-weight: bold;'>Intercept</span>",
+  "log(POSS)" = "<span style='color: black; font-weight: bold;'>log(POSS)</span>",
+  "Age" = "<span style='color: black; font-weight: bold;'>Age</span>",
+  "USG." = "<span style='color: black; font-weight: bold;'>USG%</span>",
+  "DBPM" = "<span style='color: black; font-weight: bold;'>DBPM</span>",
+  "FGA.0.3" = "<span style='color: black; font-weight: bold;'>FGA% (0–3 ft)</span>",
+  "ORB." = "<span style='color: black; font-weight: bold;'>ORB%</span>",
+  "FGA.3.10" = "<span style='color: black; font-weight: bold;'>FGA% (3–10 ft)</span>",
+  "FG.3.10" = "<span style='color: black; font-weight: bold;'>FG% (3–10 ft)</span>",
+  "FTr" = "<span style='color: black; font-weight: bold;'>FTAr</span>",
+  "Dist." = "<span style='color: black; font-weight: bold;'>Avg Shot Dist</span>",
+  "Age:USG." = "<span style='color: black; font-weight: bold;'>Age × USG%</span>"
+)
+formatted_terms <- map2_chr(coefs, terms, ~ {
+  stat <- pretty_names[.y]
+  value <- round(.x, 3)
+  if (.y == "(Intercept)") {
+    glue::glue("<span style='color: #b22222; font-style: italic;'>{value}</span>")
+  } else {
+    sign <- ifelse(value >= 0, "+", "–")
+    glue::glue("<span style='color: #b22222; font-style: italic;'> {sign} {abs(value)} ×</span> {stat}")
+  }
+})
+line_breaks <- ceiling(seq_along(formatted_terms) / 4)
+equation_lines <- split(formatted_terms, line_breaks)
+equation_lines <- map_chr(equation_lines, ~ paste(.x, collapse = " "))
+equation_block <- paste(equation_lines, collapse = "<br>")
+cat(glue::glue('
+<div style="background-color: #f5f5f5; padding: 14px 20px; border-radius: 6px; text-align: center; font-size: 16px; font-family: sans-serif;">
+  <span style="color: black; font-weight: bold;">log(Salary)</span><span style="color: #b22222; font-style: italic;"> =</span>{equation_block}
+</div>
+'))
+```
+<br>
+<span style="font-size: 16px;">
+Compared to the raw salary model, this log-transformed version includes a notably different set of predictors. I opted to use **log(POSS)** rather than raw possessions after observing that it provided a better linear fit and helped reduce heteroskedasticity, a common issue when modeling right-skewed variables like salary. Other additions like **Average Shot Distance** and short-range shooting metrics offered insight into shot selection and scoring efficiency near the rim. With an adjusted R² of *`r round(summary(model2_clean)$adj.r.squared, 3)`*, this model explains a substantial portion of the variance in player salary (in log terms). It’s important to interpret the coefficients accordingly: since the dependent variable is log-transformed, a one-unit increase in any predictor corresponds to a *multiplicative* (percentage-based) change in salary rather than an absolute one. This makes the model more interpretable when comparing relative impact across features, especially for lower-paid players or those on varying contract scales.
+</span>
+<br>
+<br>
+```{r, results='asis',echo=FALSE}
+cat('<div style="text-align: center;">')
+residuals <- exp(test_data3$salary) - exp(test_data3$pred_salary_clean)
+ggplot(data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(fill = "firebrick4", bins = 30, alpha = 0.8, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black", linewidth = 1) +
+  labs(
+    title = "Distribution of Residuals (Cleaned Log Salary Model)",
+    x = "Residual (Actual - Predicted Salary)",
+    y = "Count"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format(scale = 1e-6, suffix = "M")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text = element_text(size = 10),
+    plot.background = element_rect(fill = '#f5f5f5', color = '#f5f5f5')
+  )
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+Overall, the log-transformed model provides a useful alternative to the raw salary approach by offering a more statistically stable and interpretable framework—particularly when evaluating proportional differences in salary outcomes. While it does not outperform the raw model in terms of mean absolute error or adjusted R², its ability to reduce skew and isolate relative impact makes it valuable in certain analytical contexts. For example, this version is well-suited for comparing players across contract tiers or evaluating changes in value across time. Ultimately, while the raw salary model may be slightly stronger for precise salary prediction, the log model offers cleaner residual patterns and may be more appropriate for understanding percentage-based influences on compensation. Depending on the specific application—whether forecasting dollar value or explaining variation—either model has merit.
+</span>
+<br>
+
+# Model 3 - Percentile-Based Salary
+<span style="font-size: 16px;">
+For the third modeling approach, I shifted from predicting absolute salary values to predicting a player's percentile rank within the overall salary distribution. This method provides a relative measure of a player’s market value compared to their peers, rather than focusing solely on the dollar amount. Predicting salary percentile can be particularly useful when comparing players across seasons, different contract environments, or varying salary cap conditions, as it inherently adjusts for broader shifts in the league’s financial landscape. It also opens up the ability to rank and tier players more flexibly, rather than relying strictly on raw figures that may fluctuate heavily from year to year.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+To build the model, I again used linear regression on player-level stats, but with *salary percentile*—scaled from 0 to 100—as the target variable instead of salary itself. As with the earlier models, I performed both forward and backward subset selection to find the most impactful predictors. After training the initial model, I applied outlier filtering based on leverage, standardized residuals, and Cook’s distance to clean the data and improve model robustness. The final version aims to explain how certain on-court production metrics—like usage, efficiency, and playmaking—relate to a player's salary standing among NBA point guards. The resulting cleaned model formula is shown below:
+</span>
+<br>
+<br>
+```{r, results='asis', echo=FALSE}
+coefs <- coef(model_ptile_clean)
+terms <- names(coefs)
+pretty_names <- c(
+  "(Intercept)" = "<span style='color: black; font-weight: bold;'>Intercept</span>",
+  "POSS" = "<span style='color: black; font-weight: bold;'>POSS</span>",
+  "Age" = "<span style='color: black; font-weight: bold;'>Age</span>",
+  "USG." = "<span style='color: black; font-weight: bold;'>USG%</span>",
+  "DBPM" = "<span style='color: black; font-weight: bold;'>DBPM</span>",
+  "FGA.3.10" = "<span style='color: black; font-weight: bold;'>FGA% (3–10 ft)</span>",
+  "FG.3.10" = "<span style='color: black; font-weight: bold;'>FG% (3–10 ft)</span>",
+  "BLK." = "<span style='color: black; font-weight: bold;'>BLK%</span>",
+  "AST." = "<span style='color: black; font-weight: bold;'>AST%</span>"
+)
+formatted_terms <- map2_chr(coefs, terms, ~ {
+  stat <- pretty_names[.y]
+  value <- round(.x, 3)
+  if (.y == "(Intercept)") {
+    glue::glue("<span style='color: #b22222; font-style: italic;'>{value}</span>")
+  } else {
+    sign <- ifelse(value >= 0, "+", "–")
+    glue::glue("<span style='color: #b22222; font-style: italic;'> {sign} {abs(value)} ×</span> {stat}")
+  }
+})
+line_breaks <- ceiling(seq_along(formatted_terms) / 4)
+equation_lines <- split(formatted_terms, line_breaks)
+equation_lines <- map_chr(equation_lines, ~ paste(.x, collapse = " "))
+equation_block <- paste(equation_lines, collapse = "<br>")
+cat(glue::glue('
+<div style="background-color: #f5f5f5; padding: 14px 20px; border-radius: 6px; text-align: center; font-size: 16px; font-family: sans-serif;">
+  <span style="color: black; font-weight: bold;">Salary Percentile</span><span style="color: #b22222; font-style: italic;"> =</span>{equation_block}
+</div>
+'))
+```
+<br>
+<span style="font-size: 16px;">
+After fitting the model and cleaning for outliers, the percentile-based salary model achieved a mean absolute error of approximately *`r round(mean(abs(test_data4$salary_ptile - test_data4$pred_salary_ptile_clean)), 1)`* percentile points on the test set. The model also produced a strong adjusted R² of *`r round(summary(model_ptile_clean)$adj.r.squared, 3)`*, indicating that it explains a substantial portion of the variance in salary rankings among point guards. Given that percentile predictions inherently focus on relative position rather than exact dollar amounts, this model offers a useful and interpretable way to evaluate player standing within the salary hierarchy. In the next visual, I further assess how well the predicted and actual percentiles align across the player sample.
+</span>
+<br>
+<br>
+```{r, results='asis', echo=FALSE}
+cat('<div style="text-align: center;">')
+ggplot(test_data4, aes(x = salary_ptile*100, y = pred_salary_ptile_clean)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = FALSE, color = "firebrick4", linewidth = 1, formula = y~x) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+  labs(
+    title = "Predicted vs Actual Salary Percentile (Cleaned Model)",
+    subtitle = "Dashed line = perfect prediction | Red line = LOESS trend",
+    x = "Actual Salary Percentile",
+    y = "Predicted Salary Percentile"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 100)) +
+  scale_y_continuous(limits = c(0, 100)) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text = element_text(size = 10),
+    plot.background = element_rect(fill = "#f5f5f5", color = "#f5f5f5"),
+    panel.background = element_rect(fill = "#f5f5f5", color = "#f5f5f5")
+  )
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+The overall performance of the percentile-based salary model highlights important connections between a point guard's statistical profile and their standing within the NBA salary hierarchy. Positive coefficients for metrics like **Usage Rate (USG%)**, **Field Goal Percentage (3–10 ft)**, and **Assist Rate (AST%)** reflect the high value placed on guards who can not only handle a heavy offensive load but also create for themselves and others efficiently in the midrange and close to the rim—an area traditionally important for smaller guards navigating traffic in the paint. Conversely, negative coefficients on stats like **DBPM** (defensive box plus-minus) and **short-range FGA rates** suggest that point guards whose impact skews heavily defensive or who struggle finishing at the rim may be relatively less valued from a salary perspective, especially compared to offensive versatility. The plot above further shows that while there is some spread, particularly in the lower salary ranges, the model captures a strong overall relationship between predicted and actual standing. The LOESS curve tracks upward in a reasonably aligned manner, suggesting the model is effective at separating higher-paid guards from lower-paid ones based on statistical contributions. Ultimately, this model provides a nuanced lens into how play style, scoring zones, and usage patterns shape a point guard’s market value in today’s NBA.
+</span>
+
+# Comparative Analysis of Salary Models
+<span style="font-size:16px;">
+Across the three modeling approaches—raw salary, log-transformed salary, and percentile salary—a few key factors consistently emerge as drivers of point guard value. Metrics centered around **offensive creation** and **efficiency** are especially important, with variables like **Usage Rate (USG%)**, **Offensive Box Plus-Minus (OBPM)**, and **FG% from 3–10 feet** appearing prominently. This aligns well with the expectations for the point guard position: players who can efficiently handle a large offensive load and create opportunities for themselves and others are more highly compensated. Positive coefficients on variables like **USG%**, **short-range shooting efficiency**, and even **AST%** in the percentile model suggest that assertive offensive playmaking and finishing touch close to the rim elevate a point guard’s value. Interestingly, **Turnover Rate (TOV%)** showed a small positive coefficient in the raw salary model, which may indicate that players entrusted with high usage roles—despite occasional mistakes—still command strong salaries based on their overall offensive responsibility. Additionally, defensive impact, measured through **Block Percentage (BLK%)**, surfaced positively in multiple models, reflecting how supplemental defensive contributions can provide added value even for guards. On the other hand, some variables displayed negative coefficients, such as **FGA% from 0–3 feet** and **Average Shot Distance** in the log-salary model. These results suggest that poor finishing efficiency around the basket or an overreliance on longer jump shots can slightly lower a point guard's market value, emphasizing the premium placed on efficient scoring inside and smart shot selection.
+</span>
+<br>
+<br>
+<span style="font-size:16px;">
+From a modeling perspective, I chose linear regression combined with subset selection because it offers a strong balance between interpretability, parsimony, and statistical efficiency. NBA salary data, especially when focused narrowly on a single position like point guards, is prone to noise from external factors like team fit, market size, and injuries. Building linear models while using forward and backward subset selection helped isolate the variables most strongly tied to compensation without overfitting the data. This approach made it easier to trace how specific statistical strengths—such as shot creation efficiency, possession usage, and complementary defensive skills—translate into salary outcomes. While each model (raw, log-transformed, percentile) offered slightly different framing on player value, together they emphasize that in today’s NBA, point guards who can **create, score efficiently at multiple levels, limit inefficiencies around the rim, and impact the game beyond just scoring** are the ones most rewarded financially.
+</span>
+<br>
+<br>
+```{r, results='asis',echo=FALSE}
+cat('<div style="text-align: center;">')
+mae_raw <- paste0('$',round(mean(abs(test_data2$salary - test_data2$pred_salary_clean)) / 1000000,3), 'M')
+mae_log <- paste0('$',round(mean(abs(exp(test_data3$salary) - exp(test_data3$pred_salary_clean))) / 1000000,3), 'M')
+mae_ptile <- paste0(round(mean(abs((test_data4$salary_ptile*100) - test_data4$pred_salary_ptile_clean)),2), '%')
+std_residuals_raw <- (test_data2$pred_salary_clean - test_data2$salary) / sd(test_data2$salary, na.rm = TRUE)
+std_residuals_log <- (exp(test_data3$pred_salary_clean) - exp(test_data3$salary)) / sd(exp(test_data3$salary), na.rm = TRUE)
+std_residuals_ptile <- (test_data4$pred_salary_ptile_clean - test_data4$salary_ptile) / sd(test_data4$salary_ptile, na.rm = TRUE)
+model_comparison <- tibble(
+  `Model` = c("Raw Salary", "Log Salary", "Percentile Salary"),
+  `Mean Absolute Error` = c(mae_raw, mae_log, mae_ptile),
+  `Adjusted R²` = c(
+    round(summary(model_clean)$adj.r.squared, 3),
+    round(summary(model2_clean)$adj.r.squared, 3),
+    round(summary(model_ptile_clean)$adj.r.squared, 3)
+  ),
+  `# of Predictors` = c(
+    length(coef(model_clean)) - 1,
+    length(coef(model2_clean)) - 1,
+    length(coef(model_ptile_clean)) - 1
+  ),
+  `Primary Predictors` = c(
+    "OBPM<br>USG%<br>Age",
+    "log(POSS)<br>Age<br>FGA% (0–3ft)",
+    "POSS<br>Age<br>USG%"
+  ),
+  `Scale Robustness` = c("Medium", "High", "High"),
+  `Interpretability` = c("High", "Medium", "High"),
+  `Residuals` = list(std_residuals_raw, std_residuals_log, std_residuals_ptile)
+)
+title_header <- glue(
+  "<div style='display: flex; align-items: center; justify-content: space-between;'>
+    <div style='text-align: left;'>
+      <img src='https://upload.wikimedia.org/wikipedia/en/thumb/0/03/National_Basketball_Association_logo.svg/120px-National_Basketball_Association_logo.svg.png' style='height: 70px; width: auto; border-radius: 5px;'>
+    </div>
+    <div style='text-align: center; flex-grow: 1;'>
+      <span style='font-family: Arial, sans-serif; font-size: 22px; font-weight: bold; text-decoration: underline;'>Model Performance Metrics for Salary Prediction Approaches</span><br>
+      <span style='font-family: Arial, sans-serif; font-size: 20px; font-weight: bold;'>All Models Without Their Outliers</span>
+    </div>
+  </div>"
+)
+gt(model_comparison) %>%
+  tab_style(style = cell_text(align = 'left', weight = 'bold', size = 14), locations = cells_body(columns = c(Model))) %>%
+  tab_style(style = cell_text(align = 'center', size = 14), locations = cells_body(columns = c(`Mean Absolute Error`, `Adjusted R²`, `# of Predictors`, `Primary Predictors`, `Scale Robustness`, `Interpretability`, `Residuals`))) %>%
+  tab_style(style = cell_text(align = 'center', weight = 'bold', decorate = 'underline'), locations = cells_column_labels()) %>%
+  gt_add_divider(Model, weight = px(1.5)) %>%
+  gt_plt_dist(`Residuals`, type = "density", line_color = 'grey', fill_color = 'firebrick4') %>%
+  fmt_markdown(columns = c(`Primary Predictors`)) %>%
+  tab_footnote(footnote = "Standardized Distribution of Resiudals", locations = cells_column_labels(columns = c(`Residuals`))) %>%
+  tab_style(style = cell_text(size = 12), locations = cells_body(columns = c(`Primary Predictors`))) %>%
+  gt_add_divider(columns = c(`Mean Absolute Error`, `Adjusted R²`, `# of Predictors`, `Primary Predictors`, `Scale Robustness`, `Interpretability`), weight = px(0.5)) %>%
+  tab_header(title = html(title_header))
+cat('</div>')
+```
+<span style="font-size: 16px;">
+The table above provides a side-by-side comparison of the three cleaned models across key evaluation metrics. While each approach has clear strengths, the **log-transformed salary model** ultimately emerges as the most balanced and effective. Although its mean absolute error is slightly higher than the raw salary model, the log model offers **greater scale robustness**, **stronger residual patterns**, and **lower multicollinearity** among predictors, which is critical for building stable, interpretable models. The predictor set—centered around **possession load (log(POSS))**, **age**, and **short-range shot attempt share (FGA% 0–3 feet)**—aligns more logically with true player usage and offensive role, offering a cleaner explanation of point guard salary drivers. Meanwhile, the raw salary model, despite a strong adjusted R², showed some oddities: factors like **2PT and 3PT shooting percentages** had negative coefficients, and **turnover percentage (TOV%)** appeared with a positive coefficient, both of which run counter to typical expectations about player value. By stabilizing salary outcomes and tying predictors more closely to real basketball traits, the log-transformed model provides a more reliable and analytically sound foundation for evaluating point guard compensation across different salary tiers.
+</span>
+<br>
+
+# Applying the Model: Player Evaluation and Insights
+<span style="font-size: 16px;">
+In this section, I apply the log-transformed salary model to evaluate specific player seasons and assess how closely their actual earnings aligned with their statistical production. By comparing predicted salaries to real-world contracts, I can identify cases where the model suggests a player may have been overpaid, underpaid, or fairly compensated relative to their on-court performance. This provides a practical way to test the model’s effectiveness while highlighting real examples where player value may have exceeded or fallen short of market expectations.
+</span>
+<br>
+<br>
+<span style="font-size: 20px; font-weight: bold; text-decoration: underline; margin-top: 0px; margin-bottom: 10px;">
+Darius Garland – 2023/24 Season
+</span>
+<br>
+<span style="font-size: 16px;">
+In the 2023–24 season, Darius Garland entered the first year of his five-year designated rookie extension, earning approximately **$34 million**. However, based on his statistical production, the model predicted a salary of just under **$8 million**—only about *23%* of his actual earnings. Garland appeared in only 57 games that year, the fewest since his rookie season, and posted declines in several key areas compared to previous seasons. His scoring dropped to **18.0 points per game**, down from *21.6* the year before, and his **3-point percentage fell to 37.1%**, his lowest since his second year in the league. His assist numbers also dipped to **6.5 assists per game**, while his turnover rate remained relatively high at **3.1 turnovers per game**. Although he maintained **decent shooting efficiency** overall *(44.6% FG, 83.4% FT)*, the drop in volume, playmaking, and overall impact relative to his hefty salary was significant. The model effectively captured this underperformance, offering a clear monetary perspective on how Garland’s production in 2023–24 did not align with the value of a max contract point guard.
+</span>
+<br>
+<br>
+<span style="font-size: 20px; font-weight: bold; text-decoration: underline; margin-top: 0px; margin-bottom: 10px;">
+Reggie Jackson – 2023/24 Season
+</span>
+<br>
+<span style="font-size: 16px;">
+In the 2023–24 season, Reggie Jackson signed a modest two-year deal with the Denver Nuggets, earning around **$5 million** for the year. However, based on his statistical output, the model projected a value closer to **$19.5 million**—nearly *four times* his actual salary. Jackson appeared in 72 games, providing consistent minutes off the bench with **19.9 minutes per game**, and delivered **10.2 points** and **3.8 assists per game**. His shooting splits were strong for a veteran guard, posting **43.1% from the field** and **35.2% from three**, while maintaining **low turnover numbers** *(1.3 per game)*. Despite a lower overall role compared to his prime years, Jackson's efficient scoring, steady playmaking, and ball security made him a highly valuable depth piece on a contending team. The model accurately reflected how his contributions, relative to his small salary, were extremely cost-effective, highlighting an underappreciated veteran season.
+</span>
+<br>
+<br>
+<span style="font-size: 20px; font-weight: bold; text-decoration: underline; margin-top: 0px; margin-bottom: 10px;">
+Interactive Player Salary Evaluation Table
+</span>
+<br>
+<span style="font-size: 16px;">
+The table below allows users to explore how the model's predicted salaries compared to actual earnings across point guards from the 2019–20 through 2024–25 seasons. Players can be searched by name, and each entry shows the actual salary, the model's predicted salary, and an evaluation of whether the player *overpaid*, *underpaid*, or played *accurate* to their predicted salary.
+</span>
+```{r, results='asis', echo=FALSE}
+reactable(
+  interactive_table,
+  columns = list(
+    Player = colDef(name = "Player", align = "left", filterable = TRUE),
+    Year = colDef(name = "Year", align = "left"),
+    actual_salary = colDef(
+      name = "Actual Salary",
+      align = "center",
+      format = colFormat(currency = "USD", separators = TRUE, digits = 0)
+    ),
+    pred_salary = colDef(
+      name = "Predicted Salary",
+      align = "center",
+      format = colFormat(currency = "USD", separators = TRUE, digits = 0)
+    ),
+    evaluation = colDef(name = "Evaluation", align = "right")
+  ),
+  searchable = FALSE,
+  defaultPageSize = 5,
+  highlight = TRUE,
+  bordered = TRUE,
+  striped = TRUE,
+  pagination = TRUE,
+  style = list(fontSize = "14px", textAlign = "center", margin = "0 auto"),
+  theme = reactableTheme(
+    headerStyle = list(
+      backgroundColor = "#f5f5f5",
+      fontWeight = "bold",
+      fontSize = "15px",
+      borderBottom = "1px solid #aaa"
+    )
+  )
+)
+```
+
+# Recap
+<span style="font-size: 16px;">
+Working on this project has been a fun experience. I enjoyed diving deep into NBA data, building models, creating visualizations, and finding ways to better understand how player salaries align with their on-court performance. Throughout this project, I learned a lot about improving model selection, communicating insights through visuals, and building cleaner, more structured code. This project could be improved by using the model to predict what annual salary that player then deserves given their past on-court metrics. Additionally, incorparting team-based success and metrics into the model would defintely help to improve accuracy and fit. 
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+Looking ahead, I plan to continue developing projects like this by expanding the types of metrics considered, exploring deeper predictive modeling techniques, and making my visual storytelling even stronger. I welcome any feedback or suggestions on how I can continue to grow in this space. 
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+If you would like to reach out, feel free to contact me through my [personal website](https://glederer04.github.io/#nba-projects).
+</span>
+<br>

@@ -1,0 +1,799 @@
+---
+title: "A Closer Look at NBA Point Guards and What Impacts Their Salary"
+#output: html_document
+author: 'Gregory Lederer'
+output:
+  rmdformats::readthedown
+---
+<div style="text-align: left; font-size: 48px; font-weight: bold; margin-top: -5px; margin-bottom: 10px;">
+  Part 1
+</div>
+<style>
+h1 {
+  font-size: 24px;
+  font-weight: bold;
+  text-decoration: underline;
+  margin-bottom: 8px;
+  margin-top: 30px;
+}
+h2 {
+  font-size: 20px;
+  font-weight: bold;
+  text-decoration: underline;
+  margin-bottom: 6px;
+  margin-top: 24px;
+}
+h1 + p, h2 + p {
+  margin-top: 4px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/gregorylederer/Desktop/NBA Project")
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(htmltools)
+library(rvest)
+library(treemapify)
+library(scales)
+library(readxl)
+library(stringi)
+library(plotly)
+library(glue)
+library(gt)
+library(gtExtras)
+library(gridExtra)
+library(rmdformats)
+library(prettydoc)
+```
+
+```{r, include=FALSE}
+salaries_data <- read.csv('24-25 Salaries Data.csv')
+pergame_data <- read.csv('24-25 Pergame Data.csv')
+advanced_data <- read.csv('24-25 Advanced Data.csv')
+pbp_data <- read.csv('24-25 PBP Data.csv')
+shooting_data <- read.csv('24-25 Shooting Data.csv')
+
+shooting_data20 <- read.csv('19-20 Shooting Data.csv')
+shooting_data21 <- read.csv('20-21 Shooting Data.csv')
+shooting_data22 <- read.csv('21-22 Shooting Data.csv')
+shooting_data23 <- read.csv('22-23 Shooting Data.csv')
+shooting_data24 <- read.csv('23-24 Shooting Data.csv')
+
+salaries_24 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 1)
+salaries_23 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 2)
+salaries_22 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 3)
+salaries_21 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 4)
+salaries_20 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 5)
+
+advanced_data20 <- read.csv('19-20 Advanced Data.csv')
+advanced_data21 <- read.csv('20-21 Advanced Data.csv')
+advanced_data22 <- read.csv('21-22 Advanced Data.csv')
+advanced_data23 <- read.csv('22-23 Advanced Data.csv')
+advanced_data24 <- read.csv('23-24 Advanced Data.csv')
+```
+
+```{r, include=FALSE}
+salaries_data <- salaries_data %>% rename(`2024-25` = `X2024.25`)
+
+salaries_data$`2024-25` <- gsub("\\$|,", "", salaries_data$`2024-25`)
+salaries_data$`2024-25` <- as.numeric(salaries_data$`2024-25`)
+
+pbp_unique_player <- pbp_data %>%
+  group_by(Player) %>%
+  slice_max(order_by = as.numeric(G), n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+pbp_unique_player <- pbp_unique_player %>%
+  rowwise() %>%
+  mutate(
+    true_pos = {
+      pos_cols <- c_across(9:13)
+      pos_names <- names(pbp_data)[9:13]
+      max_index <- which.max(pos_cols)
+      sub(".$", "", pos_names[max_index])
+    }
+  ) %>%
+  ungroup()
+
+pbp_unique_player1 <- pbp_unique_player %>% select(Player, Age, true_pos)
+
+salaries1 <- salaries_data %>%
+  left_join(pbp_unique_player1, by = c('Player'))
+
+salaries1 <- salaries1[!(is.na(salaries1$true_pos)),]
+
+salaries1$true_pos <- factor(salaries1$true_pos, levels = c("PG", "SG", "SF", "PF", "C"))
+
+age_plot_data <- salaries1 %>%
+  group_by(Age) %>%
+  summarise(
+    avg_salary = mean(`2024-25`, na.rm = TRUE),
+    player_count = n()
+  ) %>%
+  ungroup() %>%
+  filter(player_count >= 2)
+
+salary_summary_text <- salaries1 %>%
+  group_by(true_pos) %>%
+  summarise(
+    count = n(),
+    mean_salary = mean(`2024-25`, na.rm = TRUE),
+    sd_salary = sd(`2024-25`, na.rm = TRUE),
+    iqr_salary = IQR(`2024-25`, na.rm = TRUE),
+    min_salary = min(`2024-25`, na.rm = TRUE),
+    max_salary = max(`2024-25`, na.rm = TRUE)
+  ) %>%
+  arrange(desc(iqr_salary))
+
+shooting_data20_pgs <- shooting_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data21_pgs <- shooting_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data22_pgs <- shooting_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data23_pgs <- shooting_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data24_pgs <- shooting_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data_pgs <- shooting_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_shooting <- bind_rows(
+  shooting_data20_pgs,
+  shooting_data21_pgs,
+  shooting_data22_pgs,
+  shooting_data23_pgs,
+  shooting_data24_pgs,
+  shooting_data_pgs
+)
+salaries_20 <- salaries_20 %>% mutate(Year = "2019-20") %>% rename(Player = player)
+salaries_21 <- salaries_21 %>% mutate(Year = "2020-21") %>% rename(Player = player)
+salaries_22 <- salaries_22 %>% mutate(Year = "2021-22") %>% rename(Player = player)
+salaries_23 <- salaries_23 %>% mutate(Year = "2022-23") %>% rename(Player = player)
+salaries_24 <- salaries_24 %>% mutate(Year = "2023-24") %>% rename(Player = player)
+salaries_data <- salaries_data %>% mutate(Year = "2024-25")
+normalize_names <- function(df) {
+  df %>% mutate(Player = stri_trans_general(Player, "Latin-ASCII"))
+}
+salaries_20 <- normalize_names(salaries_20)
+salaries_21 <- normalize_names(salaries_21)
+salaries_22 <- normalize_names(salaries_22)
+salaries_23 <- normalize_names(salaries_23)
+salaries_24 <- normalize_names(salaries_24)
+salaries_data <- normalize_names(salaries_data)
+all_pg_shooting <- normalize_names(all_pg_shooting)
+salaries_all_yrs <- bind_rows(
+  salaries_20 %>% select(Player, Year, salary),
+  salaries_21 %>% select(Player, Year, salary),
+  salaries_22 %>% select(Player, Year, salary),
+  salaries_23 %>% select(Player, Year, salary),
+  salaries_24 %>% select(Player, Year, salary),
+  salaries_data %>% select(Player, Year, salary=`2024-25`)
+)
+all_pg_shooting <- all_pg_shooting %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+all_pg_shooting_salaries <- all_pg_shooting %>% filter(!is.na(salary))
+plot_data <- all_pg_shooting_salaries %>%
+  filter(Year != "2024-25")
+
+pos_salaries_20 <- salaries_20 %>%
+  left_join(shooting_data20 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_21 <- salaries_21 %>%
+  left_join(shooting_data21 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_22 <- salaries_22 %>%
+  left_join(shooting_data22 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_23 <- salaries_23 %>%
+  left_join(shooting_data23 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_24 <- salaries_24 %>%
+  left_join(shooting_data24 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_25 <- salaries_data %>%
+  left_join(shooting_data %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary=`2024-25`) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries <- bind_rows(pos_salaries_20, pos_salaries_21, pos_salaries_22, pos_salaries_23, pos_salaries_24, pos_salaries_25)
+
+summary_by_year <- pos_salaries %>%
+  group_by(Pos, Year) %>%
+  summarise(
+    avg_salary = mean(salary, na.rm = TRUE),
+    median_salary = median(salary, na.rm = TRUE),
+    iqr = IQR(salary, na.rm = TRUE),
+    variance = var(salary, na.rm = TRUE),
+    max_salary = max(salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+iqr_trend <- summary_by_year %>%
+  select(Pos, Year, iqr) %>%
+  pivot_wider(names_from = Year, values_from = iqr) %>%
+  nest(IQR_Trend = -Pos)
+variance_trend <- summary_by_year %>%
+  select(Pos, Year, variance) %>%
+  pivot_wider(names_from = Year, values_from = variance) %>%
+  nest(Variance_Trend = -Pos)
+summary_snapshot <- summary_by_year %>%
+  filter(Year %in% c("2019-20", "2024-25")) %>%
+  select(Pos, Year, avg_salary, median_salary, max_salary) %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = c(avg_salary, median_salary, max_salary),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    pct_growth = 100 * (`avg_salary_2024-25` - `avg_salary_2019-20`) / `avg_salary_2019-20`
+  )
+final_gt_data <- summary_snapshot %>%
+  left_join(iqr_trend, by = "Pos") %>%
+  left_join(variance_trend, by = "Pos") %>%
+  mutate(
+    `avg_salary_2024-25` = round(`avg_salary_2024-25` / 1e6,3),
+    `median_salary_2024-25` = round(`median_salary_2024-25` / 1e6,3),
+    `max_salary_2024-25` = round(`max_salary_2024-25` / 1e6,3)
+  ) %>%
+  select(
+    Pos,
+    `avg_salary_2024-25`,
+    pct_growth,
+    `median_salary_2024-25`,
+    IQR_Trend,
+    `max_salary_2024-25`,
+    Variance_Trend
+  )
+final_gt_data <- final_gt_data %>%
+  mutate(Pos = factor(Pos, levels = c("PG", "SG", "SF", "PF", "C"))) %>%
+  arrange(Pos)
+
+all_pg_shooting1 <- bind_rows(
+  shooting_data20_pgs,
+  shooting_data21_pgs,
+  shooting_data22_pgs,
+  shooting_data23_pgs,
+  shooting_data24_pgs,
+  shooting_data_pgs
+)
+pgs_yr_summary <- all_pg_shooting1 %>%
+  group_by(Year) %>%
+  summarise(avg_dist = mean(as.numeric(`Dist.`), na.rm = TRUE))
+pgs_shot_dist_summary <- all_pg_shooting1 %>%
+  group_by(Year) %>%
+  summarise(
+    pct_0_3 = mean(as.numeric(`FGA.0.3`), na.rm = TRUE),
+    pct_3_10 = mean(as.numeric(`FGA.3.10`), na.rm = TRUE),
+    pct_10_16 = mean(as.numeric(`FGA.10.16`), na.rm = TRUE),
+    pct_16_3P = mean(as.numeric(`FGA.16.3P`), na.rm = TRUE),
+    pct_3P = mean(as.numeric(`FGA.3P`), na.rm = TRUE)
+  )
+pgs_long <- pgs_shot_dist_summary %>%
+  pivot_longer(
+    cols = starts_with("pct_"),
+    names_to = "ShotZone",
+    values_to = "FGA_pct"
+  )
+pgs_long$ShotZone <- recode(pgs_long$ShotZone,
+                            pct_0_3 = "0-3 ft",
+                            pct_3_10 = "3-10 ft",
+                            pct_10_16 = "10-16 ft",
+                            pct_16_3P = "16 ft - 3P",
+                            pct_3P = "3P")
+pgs_long$ShotZone <- factor(pgs_long$ShotZone,
+                            levels = c("0-3 ft", "3-10 ft", "10-16 ft", "16 ft - 3P", "3P"))
+
+corr_data <- all_pg_shooting_salaries %>%
+  mutate(log_salary = log(salary)) %>%
+  select(log_salary, all_of(names(.)[9:24]), all_of(names(.)[27:28])) %>%
+  mutate(across(everything(), as.numeric))
+cor_results <- sapply(corr_data[-1], function(x) cor(x, corr_data$log_salary, use = "complete.obs"))
+cor_df <- data.frame(
+  Variable = names(cor_results),
+  Correlation = round(cor_results, 3)
+) %>%
+  arrange(desc(abs(Correlation)))
+cor_heatmap <- cor_df %>%
+  mutate(
+    Variable = recode(Variable,
+      "FG." = "FG%",
+      "FG.3.10" = "FG% (3-10 ft)",
+      "FG.2p" = "FG% (2PT)",
+      "FG.0.3" = "FG% (0-3 ft)",
+      "FG.3P" = "FG% (3PT)",
+      "FGA.10.16" = "FGA% (10-16 ft)",
+      "Corner3P." = "Corner 3PT%",
+      "FGA.16.3P" = "FGA% (16ft–3PT)",
+      "FG.10.16" = "FG% (10-16 ft)",
+      "FGA.2p" = "FGA% (2PT)",
+      "FG.16.3P" = "FG% (16ft–3PT)",
+      "FGA.3.10" = "FGA% (3-10 ft)",
+      "Dist." = "Avg Shot Dist",
+      "FGA.0.3" = "FGA% (0-3 ft)",
+      "FGA.3P" = "FGA% (3PT)",
+      "FG.2P_ast" = "%Assisted 2PT",
+      "Corner3PA." = "Corner 3PA%",
+      "FG.3P_ast" = "%Assisted 3PT"
+    )
+  )
+cor_heatmap <- cor_heatmap %>%
+  mutate(Variable = factor(Variable, levels = Variable[order(Correlation)]))
+
+advanced_data20_pgs <- advanced_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data21_pgs <- advanced_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data22_pgs <- advanced_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data23_pgs <- advanced_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data24_pgs <- advanced_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data_pgs <- advanced_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_advanced <- bind_rows(
+  advanced_data20_pgs,
+  advanced_data21_pgs,
+  advanced_data22_pgs,
+  advanced_data23_pgs,
+  advanced_data24_pgs,
+  advanced_data_pgs
+)
+all_pg_advanced <- all_pg_advanced %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+all_pg_advanced_salaries <- all_pg_advanced %>% filter(!is.na(salary))
+
+corr_data1 <- all_pg_advanced_salaries %>%
+  mutate(log_salary = log(salary)) %>%
+  select(log_salary, all_of(names(.)[10:20])) %>%
+  mutate(across(everything(), as.numeric))
+cor_results1 <- sapply(corr_data1[-1], function(x) cor(x, corr_data1$log_salary, use = "complete.obs"))
+cor_df1 <- data.frame(
+  Variable = names(cor_results1),
+  Correlation = round(cor_results1, 3)
+) %>%
+  arrange(desc(abs(Correlation)))
+
+cor_heatmap1 <- cor_df1 %>%
+  mutate(
+    Variable = recode(Variable,
+      "TOV." = "TOV%",
+      "X3PAr" = "3PAr",
+      "STL." = "STL%",
+      "ORB." = "ORB%",
+      "BLK." = "BLK%",
+      "TRB." = "TRB%",
+      "DRB." = "DRB%",
+      "FTr" = "FTAr",
+      "TS." = "TS%",
+      "AST." = "AST%",
+      "USG." = "USG%"
+    )
+  )
+cor_heatmap1 <- cor_heatmap1 %>%
+  mutate(Variable = factor(Variable, levels = Variable[order(Correlation)]))
+
+joined_pg_data <- all_pg_advanced_salaries %>%
+  select(Player, Year, USG. = USG., TS. = TS., AST. = AST., FTr = FTr, DRB. = DRB.) %>%
+  left_join(
+    all_pg_shooting_salaries %>%
+      select(Player, Year, FG. = FG., `FG.3.10` = FG.3.10, FG.2p = FG.2p,
+             `Corner3PA.` = Corner3PA., `FG.3P_ast` = FG.3P_ast),
+    by = c("Player", "Year")
+  ) %>%
+  unique() %>%
+  mutate(across(3:12, ~ as.numeric(.)), .keep = "all") %>%
+  mutate(
+    TS. = TS.*100,
+    FTr = FTr*100,
+    FG. = FG.*100,
+    FG.3.10 = FG.3.10*100,
+    FG.2p = FG.2p*100,
+    Corner3PA. = Corner3PA.*100,
+    FG.3P_ast = FG.3P_ast*100
+  )
+
+selected_stats <- c("FG.", "FG.3.10", "FG.2p", "Corner3PA.", "FG.3P_ast",
+                    "USG.", "TS.", "AST.", "FTr", "DRB.")
+pg_long <- joined_pg_data %>%
+  select(Player, Year, all_of(selected_stats)) %>%
+  pivot_longer(cols = -c(Player, Year), names_to = "Stat", values_to = "Value") %>%
+  mutate(Value = as.numeric(Value))
+pg_summary <- pg_long %>%
+  group_by(Stat, Year) %>%
+  summarise(
+    Mean = mean(Value, na.rm = TRUE),
+    SD = sd(Value, na.rm = TRUE),
+    IQR = IQR(Value, na.rm = TRUE),
+    Dist = list(Value[Year == "2024-25"]),
+    .groups = "drop"
+  )
+wide_summary <- pg_summary %>%
+  group_by(Stat) %>%
+  summarise(
+    `2019-20 Avg` = round(Mean[Year == "2019-20"],1),
+    `2024-25 Avg` = round(Mean[Year == "2024-25"],1),
+    `Overall Std. Dev` = round(sd(Mean, na.rm = TRUE),2),
+    `Avg % Increase Per Year` = round(((Mean[Year == "2024-25"] - Mean[Year == "2019-20"]) /
+                                Mean[Year == "2019-20"] / (length(unique(pg_summary$Year)) - 1))*100,2),
+    `IQR Trend` = list(IQR),
+    `Std. Dev % Increase` = round(((SD[Year == "2024-25"] - SD[Year == "2019-20"]) / SD[Year == "2019-20"])*100,1),
+    `SD Trend` = list(SD),
+    `2024-25 Distribution` = pg_summary$Dist[pg_summary$Year == "2024-25" & pg_summary$Stat == unique(Stat)],
+    .groups = "drop"
+  )
+wide_summary <- wide_summary %>%
+  mutate(
+    Stat = recode(Stat,
+      "FG." = "FG%",
+      "FG.3.10" = "FG% (3-10 ft)",
+      "FG.2p" = "FG% (2PT)",
+      "Corner3PA." = "Corner 3PA%",
+      "FG.3P_ast" = "%Assisted 3PT",
+      "USG." = "USG%",
+      "TS." = "TS%",
+      "AST." = "AST%",
+      "FTr" = "FTAr",
+      "DRB." = "DRB%"
+    )
+  ) %>%
+  arrange(Stat)
+```
+
+# Goal
+<span style="font-size: 16px;">
+The goal of this small project is to visualize trends of NBA Point Guards and compare it to their salaries. With NBA salaries continuing to rise each season and the league placing more value on guard play, it's increasingly important to understand how player production translates to contract value. I hope for this to be the first of a couple small projects where I demonstrate my skills in R and basketball by showing recent trends in the NBA and providing reasoning behind them. To do this I will draw data primarily from [Basketball Reference](https://www.basketball-reference.com), as well as other sources when needed. Up until now, Spring '25, my [experiences](https://glederer04.github.io/#home) in basketball/analytics have either been on the business side with an NBA team, or the coaching side with a division 1 collegiate program. Through this brief series of independent research I hope to gain experience and familiarity with trends seen specifically in the NBA to one day help me earn a role with an NBA organization in the basketball operations department.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+The point guard position is unique in its responsibilities—tasked with initiating the offense, controlling pace, and making decisions that impact every possession. Point guards must balance creating for themselves and for others, often acting as the primary playmaker and floor general. Because of this, evaluating their value requires looking beyond basic stats and understanding the nuances of their role, which is exactly what this project aims to do.
+</span>
+<br>
+
+# 2024-25 Season Salary Trends
+<span style="font-size: 16px;">
+Age and experience are major factors in determining an NBA player's salary, largely due to the league’s structured contract system. Players on rookie contracts earn significantly less, regardless of performance, as their salaries are scaled based on draft position and years in the league. As players gain experience and prove themselves, they become eligible for larger extensions or free agency deals, where market value plays a much bigger role in their earnings.</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+As seen in the plot below, which features current players annual salary, those within the age of 19-24 have consistent lower salaries. With the spike in salary coming after the age of 24, when most rookie contracts are finished. There is a clear trend seen when peak years typically are for NBA players and their earnings, and when it typically starts to decline. This year the age 35 is a bit of an outlier as there are four current 35 year old NBA players, three of which are James Harden, Jimmy Butler, and DeMar Derozan. Understanding this trend will be important when looking at the on-court trends of point guards to understand their yearly earnings.
+</span>
+<br>
+<br>
+```{r,echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+print(ggplot(age_plot_data, aes(x = Age, y = avg_salary, fill = player_count)) +
+  geom_col() +
+  scale_fill_gradient(low = "gray", high = "firebrick4") +
+  scale_y_continuous(labels = label_currency(), position = "left") +
+  labs(title = "Average 2024-25 Salary by Age",
+       x = "Age",
+       y = "Average Salary",
+       fill = "# of Players") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA)
+  ))
+cat('</div>')
+```
+<div style="text-align: center;">*The plot above does not include LeBron James, the only player at age 40 in the league, as his contract would negatively impact the y-axis making it more difficult to see the differences in average salaries.*</div>
+<br>
+<br>
+<span style="font-size: 16px;">
+Now that we understand how age/experience impacts a players salary, lets look at how players at each position are paid. This visual/trend was a key reason I chose this topic for the project.
+</span>
+<br>
+<br>
+```{r,echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+print(ggplot(salaries1, aes(x = true_pos, y = `2024-25`)) +
+  geom_boxplot(fill = "firebrick4", color = 'black') +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "2024-25 Salaries by Position",
+       x = "Position", y = "Salary") +
+  theme_minimal() +
+  coord_cartesian(ylim = c(0, 50000000)) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(face = 'bold', size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    axis.text.y = element_text(size = 10),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA)
+  ))
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+As seen in the visual above, the average annual salary of point guards varies much more than that of the other four positions. This is supported by the **interquartile range (IQR)** for point guards, which is *`r salary_summary_text$iqr_salary[salary_summary_text$true_pos == "PG"] %>% scales::dollar()`*, the highest among all positions. The **mean** salary for point guards is also the largest at *`r salary_summary_text$mean_salary[salary_summary_text$true_pos == "PG"] %>% scales::dollar()`*, showing how top earners raise the overall average more significantly than in other roles. Meanwhile, the wide **standard deviation** of *`r salary_summary_text$sd_salary[salary_summary_text$true_pos == "PG"] %>% round(0) %>% scales::dollar()`* further reflects the broader spread of salaries within the PG group, from rookie-scale contracts to max-level veterans.
+</span>
+<br>
+
+# Salary Trends Over the Years
+<span style="font-size: 16px;">
+Now it's important to know if the trend seen from this season with the discrepancy in point guard salaries, has also been present in previous years. The plot below shows how point guard salaries have been distributed over the recent seasons. We will continue to use data from the 2019-20 season up until now when looking at how trends have been changing. 
+</span>
+<br>
+<br>
+```{r,echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+print(ggplot(plot_data, aes(x = Year, y = salary)) +
+  geom_boxplot(fill = "firebrick4", outlier.shape = 16, outlier.size = 1.5, color = 'black') +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(
+    title = "Point Guard Salaries by Season",
+    x = "Season",
+    y = "Salary"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA)
+  ) +
+  coord_cartesian(ylim = c(0, 50000000)))
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+The plot highlights a growing discrepancy in point guard salaries over the past few seasons, particularly beginning after the 2020-21 season. While the overall shape of the distribution remains similar, there is a noticeable widening in the upper half of the salary range — especially between the 50th and 75th percentiles. This suggests that while many PGs remain in the mid-to-lower salary tiers, a larger group has begun to separate themselves in contract earnings.
+</span>
+<br>
+<br>
+```{r,echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+title_header <- glue(
+  "<div style='display: flex; align-items: center; justify-content: space-between;'>
+    <div style='text-align: left;'>
+      <img src='https://upload.wikimedia.org/wikipedia/en/thumb/0/03/National_Basketball_Association_logo.svg/120px-National_Basketball_Association_logo.svg.png' style='height: 70px; width: auto; border-radius: 5px;'>
+    </div>
+    <div style='text-align: center; flex-grow: 1;'>
+      <span style='font-family: Arial, sans-serif; font-size: 24px; font-weight: bold; text-decoration: underline;'>Salary Trends by Position</span><br>
+      <span style='font-family: Arial, sans-serif; font-size: 22px; font-weight: bold;'>2019–25</span>
+    </div>
+  </div>"
+)
+gt(final_gt_data) %>%
+  fmt_currency(columns = c(`avg_salary_2024-25`, `median_salary_2024-25`, `max_salary_2024-25`)) %>%
+  fmt_number(columns = pct_growth, decimals = 1, suffixing = TRUE) %>%
+  gt_plt_sparkline(IQR_Trend, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_sparkline(Variance_Trend, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  cols_label(Pos = "Position", `avg_salary_2024-25` = "Avg Salary", pct_growth = "% Growth", `median_salary_2024-25` = "Median", IQR_Trend = "IQR Trend", `max_salary_2024-25` = "Top Earner", Variance_Trend = "Variance Trend") %>%
+  tab_style(style = cell_text(align = 'center', weight = 'bold', decorate = 'underline'), locations = cells_column_labels()) %>%
+  tab_style(style = cell_text(align = 'center', weight = 'bold'), locations = cells_body(columns = c(Pos))) %>%
+  tab_footnote(footnote = "in millions (2024-25)", locations = cells_column_labels(columns = c(`avg_salary_2024-25`, `median_salary_2024-25`, `max_salary_2024-25`))) %>%
+  tab_footnote(footnote = "2019-24", locations = cells_column_labels(columns = c(pct_growth))) %>%
+  gt_add_divider(Pos, weight = px(1.5)) %>%
+  gt_add_divider(columns = c(`avg_salary_2024-25`,pct_growth,`median_salary_2024-25`,IQR_Trend,`max_salary_2024-25`,Variance_Trend), weight = px(0.5)) %>%
+  tab_header(title = html(title_header))
+cat('</div>')
+```
+<span style="font-size: 16px;">
+The table provides a detailed view of how salary trends have evolved by position from 2019 to 2025. Notably, point guards (PGs) continue to lead all positions in average and top-end salaries for the 2024–25 season, with an **average** of *$14.17 million* and a **league-high individual salary** of *$55.76 million*. However, despite their top earning status, PGs have shown a more modest **percentage growth in average salary** *(58.5%)* compared to positions like power forwards (PFs), whose average salary grew by over *111%*. What stands out most for PGs is the sharp increase in **IQR** and **variance** starting around 2021–22, signaling growing salary dispersion and a widening gap between mid-tier and top-tier earners within the position. This supports the earlier visual findings and suggests that the PG market has become increasingly stratified, with a few high-value contracts pulling away from the rest.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+With the salary trends and discrepancies now established, the next step is to explore the on-court production behind these changes—specifically, what aspects of a point guard’s game have contributed to the growing variance and widening salary range. By analyzing numerous on-court metrics and trends we can begin to evaluate not only who is getting paid, but why—and whether that value aligns with their impact on the floor.
+</span>
+<br>
+
+# On-Court Point Guard Trends
+<span style="font-size: 16px;">
+In this section, we examine how the play style of point guards has evolved in recent years. The goal is to identify potential on-court factors driving the growth in IQR and variance of point guard salaries—specifically, how certain players are separating themselves through their performance, leading to a wider range of contract values. To start we will look at where point guards have been shooting from over recent years.
+</span>
+<br>
+<br>
+```{r,echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+print(ggplot(pgs_yr_summary, aes(x = Year, y = avg_dist, group = 1)) +
+  geom_line(color = "firebrick4", linewidth = 1.2) +
+  geom_point(size = 3, color = "firebrick4") +
+  labs(title = "Average Shot Distance by Year",
+       x = "Season",
+       y = "Average Shot Distance") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust=0.5, face='bold', size=18),
+    axis.title.x = element_text(face='bold', size=14),
+    axis.title.y = element_text(face='bold', size=14),
+    axis.text.x = element_text(size=10),
+    axis.text.y = element_text(size=10),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA)
+  ))
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+The chart above shows a clear upward trend in the average shot distance of point guards over the past couple seasons, with a sharp spike beginning in the 2021–22 season. Notably, this timing aligns directly with the rise in salary IQR observed earlier, suggesting that point guards began to differentiate themselves more noticeably around that time through extended range and evolving offensive roles. As shot selection has shifted farther from the basket, certain point guards have likely gained more value for their ability to stretch the floor or operate efficiently at longer distances—contributing to the growing pay gap within the position.
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+print(ggplot(pgs_long, aes(x = Year, y = FGA_pct, color = ShotZone, group = ShotZone)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c(
+    "3P" = "firebrick4",
+    "16 ft - 3P" = "black",
+    "10-16 ft" = "dodgerblue4",
+    "3-10 ft" = "darkgreen",
+    "0-3 ft" = "darkgray"
+  )) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(title = "Average FGA% by Shot Distance",
+       x = "Season",
+       y = "Average FGA%",
+       color = "Shot Distance") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust=0.5, face='bold', size=18),
+    axis.title.x = element_text(face='bold', size=14),
+    axis.title.y = element_text(face='bold', size=14),
+    axis.text.x = element_text(size=10),
+    axis.text.y = element_text(size=10),
+    legend.title = element_text(hjust=0.5, face='bold', size=14),
+    legend.text = element_text(hjust=0.5, size=10),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA)
+  ))
+cat('</div>')
+```
+<br>
+<span style="font-size: 16px;">
+This plot further supports the evolution in point guard shot selection, highlighting a steady increase in three-point attempt rate over the past six seasons. Since 2019–20, the percentage of field goal attempts coming from beyond the arc has grown each year, while attempts at the rim *(0–3 ft)* have gradually declined. This shift away from close-range shots and toward perimeter play reflects how point guards are expanding their offensive roles and skill sets—likely contributing to the growing variance in salaries as floor-spacing and shooting ability become more valuable differences among players at the position.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+This section focused specifically on shot attempt trends, as changes in shot selection—particularly the rise in perimeter play—have been widely discussed in recent seasons and clearly influence how point guards are utilized. By analyzing where PGs are getting their shots from, we begin to understand part of what separates top earners. In the next section, I shift to identifying which advanced and shooting metrics have the strongest correlation with salary. After pinpointing those key indicators, I will examine how they've evolved over time to better understand the traits driving player value.
+</span>
+<br>
+
+# Point Guard Metrics Related to Salary
+<span style="font-size: 16px;">
+In this section I aim to find key offensive metrics for point guards that relate to their salary. To adjust for the skewness in salary I use *log(salary)*. All data, similar to how it has been used throughout the entire project, has games played and minutes filters to only include valid players.
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+plot1 <- ggplot(cor_heatmap, aes(x = "", y = Variable, fill = Correlation)) +
+  geom_tile() +
+  geom_text(aes(label = Correlation), color = "black", fontface = 'bold') +
+  scale_fill_gradient2(low = "firebrick4", mid = "white", high = "firebrick4", midpoint = 0) +
+  labs(title = "Shooting Metrics\nCorrelation with Salary", 
+       x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 8),
+    axis.title.x = element_text(face = 'bold', size = 10),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA),
+    legend.position = "none")
+plot2 <- ggplot(cor_heatmap1, aes(x = "", y = Variable, fill = Correlation)) +
+  geom_tile() +
+  geom_text(aes(label = Correlation), color = "black", fontface = 'bold') +
+  scale_fill_gradient2(low = "firebrick4", mid = "white", high = "firebrick4", midpoint = 0, limits = c(-0.5, 0.5)) +
+  labs(title = "Advanced Metrics\nCorrelation with Salary", 
+       x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 8),
+    axis.title.x = element_text(face = 'bold', size = 10),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.background = element_rect(fill = "#fafafa", color = NA),
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    legend.background = element_rect(fill = "#fafafa", color = NA))
+layout1 <- matrix(c(1,2), ncol = 2)
+width <- c(0.45,0.55)
+grid.arrange(plot1, plot2, layout_matrix = layout1, widths = width)
+cat('</div>')
+```
+<div style="text-align: center;">*Each value represents the correlation strength (r) between the metric and log(salary)*</div>
+<br>
+<br>
+<span style="font-size: 16px;">
+The visual above highlights the correlation between various offensive and advanced metrics and point guard salary, using **log-transformed salary** values to adjust for skewness. On the shooting side, overall field goal percentage **(FG%)** shows the strongest *positive correlation* at *0.304*, followed closely by finishing efficiency near the rim, like **FG% from 3–10** feet and **2PT%**. Interestingly, some metrics tied to off-ball play, such as **%Assisted 3PT** and **Corner 3PA%**, have *negative correlations*, suggesting that point guards who create their own offense are valued more highly than spot-up shooters. On the advanced metrics side, Usage Rate **(USG%)** stands out with the *highest correlation* at *0.427*, followed by **Assist%** *(0.36)* and **True Shooting%** *(0.36)*, reinforcing the idea that high-usage, efficient creators drive higher salaries. Metrics like turnovers **(TOV%)** and 3-point attempt rate **(3PAr)** show *weak or negative correlations*, implying these are less influential in determining value. Overall, the strongest salary indicators align with <u>on-ball creation, usage, and scoring efficiency.</u>
+</span>
+<br>
+<br>
+```{r, echo=FALSE, results='asis'}
+cat('<div style="text-align: center;">')
+title_header <- glue(
+  "<div style='display: flex; align-items: center; justify-content: space-between;'>
+    <div style='text-align: left;'>
+      <img src='https://upload.wikimedia.org/wikipedia/en/thumb/0/03/National_Basketball_Association_logo.svg/120px-National_Basketball_Association_logo.svg.png' style='height: 50px; width: auto; border-radius: 5px;'>
+    </div>
+    <div style='text-align: center; flex-grow: 1;'>
+      <span style='font-family: Arial, sans-serif; font-size: 20px; font-weight: bold; text-decoration: underline;'>Salary Correlated Metric Trends</span><br>
+      <span style='font-family: Arial, sans-serif; font-size: 18px; font-weight: bold;'>2019–25</span>
+    </div>
+  </div>"
+)
+gt(wide_summary) %>%
+  cols_label(Stat = "Stat", `2019-20 Avg` = "2019–20 Avg", `2024-25 Avg` = "2024–25 Avg", `Overall Std. Dev` = "Overall St Dev", `Avg % Increase Per Year` = "% Increase/Yr", `IQR Trend` = "IQR Trend", `Std. Dev % Increase` = "St Dev % Increase", `SD Trend` = "St Dev Trend", `2024-25 Distribution` = "2024–25 Distribution") %>%
+  gt_plt_sparkline(`IQR Trend`, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_sparkline(`SD Trend`, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_dist(`2024-25 Distribution`, type = "density", line_color = 'grey', fill_color = 'firebrick4') %>%
+  tab_style(style = list(cell_text(align = "center", weight = "bold", decorate = "underline", size = 12)), locations = cells_column_labels(everything())) %>%
+  tab_style(style = list(cell_text(align = "left", weight = "bold", size=12)), locations = cells_body(columns = Stat)) %>%
+  tab_style(style = cell_text(align = "right", size=12), locations = cells_body(c(-Stat))) %>%
+  gt_add_divider(Stat, weight = px(1)) %>%
+  tab_header(title = html(title_header)) %>%
+  gt_add_divider(columns = c(`2019-20 Avg`,`2024-25 Avg`,`Overall Std. Dev`,`Avg % Increase Per Year`,`IQR Trend`,`Std. Dev % Increase`,`SD Trend`,`2024-25 Distribution`), weight = px(0.5))
+cat('</div>')
+```
+<span style="font-size: 16px;">
+The table above highlights trends from 2019 to 2025 for the ten metrics most strongly correlated with salary, offering further insight into how key offensive and advanced stats have shifted over time. **%Assisted 3PT**, which had a negative correlation with salary in the previous visual, has increased from *70.2%* to *77.7%*, yet its value in salary prediction may be declining as the standard deviation trend shows a modest *-5.8%* decrease. **AST%** has slightly dropped from *26.0%* to *25.3%*, with a standard deviation increase of *10.6%*, suggesting a growing divide in passing volume among point guards. Notably, **Corner 3PA%** has seen the largest year-over-year increase of *7.22%*, emphasizing its expanding role in offensive schemes, yet this off-ball tendency may not drive salary the same way on-ball creation does. Meanwhile, metrics like **FG% (3–10 ft)** and **DRB%** have shown more subtle increases but remain steady in their distribution. The sharpest increase in salary-relevant variability comes from **FG%**, which has a standard deviation growth of *74.2%*, reinforcing the idea that elite efficiency is becoming more rare and more rewarded. These evolving trends paint a clearer picture of how modern NBA offenses are developing and which player traits front offices appear to value most.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+These findings lay the groundwork for building a predictive model that estimates player salary based on performance metrics. While not included in this project, my next step will be to combine these on-court trends with key external factors—most importantly <u>age and experience</u>—which, as shown earlier, heavily influence earnings in the NBA.
+</span>
+<br>
+
+# Next Steps
+<span style="font-size: 16px;">
+Moving forward, I plan to build a predictive model that uses the trends identified in this project to estimate player salary. I will visualize model performance, explore individual case studies, and identify players who may be overvalued or undervalued based on their on-court production. This will help assess how well performance aligns with pay and expand on the insights uncovered here.
+</span>
+<br>
+<br>
+<span style="font-size: 16px;">
+While this first part focused heavily on individual scoring and efficiency metrics, the predictive model in [Part 2](https://glederer04.github.io/PG_Salaries_P2.html) will continue building around these areas. It will use the player-level trends identified here — such as scoring ability, shooting efficiency, playmaking, and turnover rates — to predict salary outcomes. Because of the nature of the point guard position, performance is often evaluated not just on volume but on the efficiency and decision-making behind it. By focusing on how these individual metrics translate to player valuation, the next step aims to more directly connect on-court production to salary expectations.
+</span>
+<br>
+
