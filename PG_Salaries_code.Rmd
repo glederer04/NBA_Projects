@@ -1,0 +1,861 @@
+---
+title: "NBA_Project"
+output: html_document
+date: "2025-04-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/gregorylederer/Desktop/NBA Project")
+```
+
+#packages
+```{r}
+library(MASS)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(htmltools)
+library(rvest)
+library(treemapify)
+library(scales)
+library(readxl)
+library(stringi)
+library(glue)
+library(car)
+library(rsample)
+library(purrr)
+library(broom)
+library(caret)
+```
+
+#salaries data
+```{r,eval=F}
+url <- 'https://www.basketball-reference.com/contracts/players.html'
+web <- read_html(url) %>% html_table()
+salaries_data <- data.frame(web)
+colnames(salaries_data) <- salaries_data[1,]
+salaries_data <- salaries_data[!(salaries_data$Player == '' | salaries_data$Player == 'Player'),-1]
+salaries_data[,5:9] <- lapply(salaries_data[,5:9], function(x) ifelse(x == '', NA, x))
+#write.csv(salaries_data, file = '24-25 Salaries Data.csv')
+```
+
+#player data
+```{r,eval=F}
+url <- 'https://www.basketball-reference.com/leagues/NBA_2025_per_game.html'
+web <- read_html(url) %>% html_table()
+pergame_data <- data.frame(web[1])
+pergame_data <- pergame_data[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2025_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data <- data.frame(web[1])
+advanced_data <- advanced_data[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2025_play-by-play.html'
+web <- read_html(url) %>% html_table()
+pbp_data <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'PG%', 'SG%', 'SF%', 'PF%', 'C%', 'plus_minus_on', 'plus_minus_off', 'tov_bad_pass', 'tov_lost_ball', 'fouled_shooter', 'fouled_offense', 'fouled_shooting', 'fouled_defensive', 'points_assisted', 'and1', 'shots_blocked', 'awards')
+colnames(pbp_data) <- colnames
+pbp_data <- pbp_data[-1,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2025_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data) <- colnames
+shooting_data <- shooting_data[-1,-1]
+
+# write.csv(pergame_data, '24-25 Pergame Data.csv')
+# write.csv(advanced_data, '24-25 Advanced Data.csv')
+# write.csv(pbp_data, '24-25 PBP Data.csv')
+# write.csv(shooting_data, '24-25 Shooting Data.csv')
+```
+
+```{r}
+salaries_data$`2024-25` <- gsub("\\$|,", "", salaries_data$`2024-25`)
+salaries_data$`2024-25` <- as.numeric(salaries_data$`2024-25`)
+
+pbp_unique_player <- pbp_data %>%
+  group_by(Player) %>%
+  slice_max(order_by = as.numeric(G), n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+pbp_unique_player <- pbp_unique_player %>%
+  rowwise() %>%
+  mutate(
+    true_pos = {
+      pos_cols <- c_across(8:12)
+      pos_names <- names(pbp_data)[8:12]
+      max_index <- which.max(pos_cols)
+      sub(".$", "", pos_names[max_index])
+    }
+  ) %>%
+  ungroup()
+
+pbp_unique_player1 <- pbp_unique_player %>% select(Player, Age, true_pos)
+
+salaries1 <- salaries_data %>%
+  left_join(pbp_unique_player1, by = c('Player'))
+
+salaries1 <- salaries1[!(is.na(salaries1$true_pos)),]
+
+salaries1$true_pos <- factor(salaries1$true_pos, levels = c("PG", "SG", "SF", "PF", "C"))
+
+ggplot(salaries1, aes(x = true_pos, y = `2024-25`)) +
+  geom_boxplot(fill = "lightblue") +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "2024-25 Salaries by Position",
+       x = "Position", y = "Salary") +
+  theme_minimal() +
+  coord_cartesian(ylim = c(0, 50000000)) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(face = 'bold', size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    axis.text.y = element_text(size = 10)
+  )
+
+age_plot_data <- salaries1 %>%
+  group_by(Age) %>%
+  summarise(
+    avg_salary = mean(`2024-25`, na.rm = TRUE),
+    player_count = n()
+  ) %>%
+  ungroup() %>%
+  filter(player_count >= 2)
+
+#no lebron
+ggplot(age_plot_data, aes(x = Age, y = avg_salary, fill = player_count)) +
+  geom_col() +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  scale_y_continuous(labels = label_currency(), position = "left") +
+  labs(title = "Average 2024-25 Salary by Age",
+       x = "Age",
+       y = "Average Salary",
+       fill = "# of Players") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold')
+  )
+```
+
+#past shooting data
+```{r,eval=F}
+url <- 'https://www.basketball-reference.com/leagues/NBA_2024_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data24 <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data24) <- colnames
+shooting_data24 <- shooting_data24[-1,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2023_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data23 <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data23) <- colnames
+shooting_data23 <- shooting_data23[-1,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2022_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data22 <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data22) <- colnames
+shooting_data22 <- shooting_data22[-1,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2021_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data21 <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data21) <- colnames
+shooting_data21 <- shooting_data21[-1,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2020_shooting.html'
+web <- read_html(url) %>% html_table()
+shooting_data20 <- data.frame(web[1])
+colnames <- c('Rk', 'Player', 'Age', 'Tm', 'Pos', 'G', 'GS', 'MP', 'FG%', 'Dist.', 'FGA.2p', 'FGA.0-3', 'FGA.3-10', 'FGA.10-16', 'FGA.16-3P', 'FGA.3P', 'FG.2p', 'FG.0-3', 'FG.3-10', 'FG.10-16', 'FG.16-3P', 'FG.3P', 'FG.2P_ast', 'FG.3P_ast', 'FGA.Dunks', 'Dunks', 'Corner3PA.', 'Corner3P.', 'Heaves_att', 'Heaves_made', 'Awards')
+colnames(shooting_data20) <- colnames
+shooting_data20 <- shooting_data20[-1,-1]
+
+# write.csv(shooting_data24, file = '23-24 Shooting Data.csv')
+# write.csv(shooting_data23, file = '22-23 Shooting Data.csv')
+# write.csv(shooting_data22, file = '21-22 Shooting Data.csv')
+# write.csv(shooting_data21, file = '20-21 Shooting Data.csv')
+# write.csv(shooting_data20, file = '19-20 Shooting Data.csv')
+```
+
+#how shot distance has changed over time
+```{r}
+shooting_data20_pgs <- shooting_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data21_pgs <- shooting_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data22_pgs <- shooting_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data23_pgs <- shooting_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data24_pgs <- shooting_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+shooting_data_pgs <- shooting_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_shooting <- bind_rows(
+  shooting_data20_pgs,
+  shooting_data21_pgs,
+  shooting_data22_pgs,
+  shooting_data23_pgs,
+  shooting_data24_pgs,
+  shooting_data_pgs
+)
+pgs_yr_summary <- all_pg_shooting %>%
+  group_by(Year) %>%
+  summarise(avg_dist = mean(as.numeric(`Dist.`), na.rm = TRUE))
+
+ggplot(pgs_yr_summary, aes(x = Year, y = avg_dist, group = 1)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_point(size = 3, color = "blue") +
+  labs(title = "Average Shot Distance of PGs by Year",
+       x = "Season",
+       y = "Average Shot Distance") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust=0.5, face='bold', size=18),
+    axis.title.x = element_text(face='bold', size=14),
+    axis.title.y = element_text(face='bold', size=14),
+    axis.text.x = element_text(size=10),
+    axis.text.y = element_text(size=10)
+  )
+
+pgs_shot_dist_summary <- all_pg_shooting %>%
+  group_by(Year) %>%
+  summarise(
+    pct_0_3 = mean(as.numeric(`FGA.0-3`), na.rm = TRUE),
+    pct_3_10 = mean(as.numeric(`FGA.3-10`), na.rm = TRUE),
+    pct_10_16 = mean(as.numeric(`FGA.10-16`), na.rm = TRUE),
+    pct_16_3P = mean(as.numeric(`FGA.16-3P`), na.rm = TRUE),
+    pct_3P = mean(as.numeric(`FGA.3P`), na.rm = TRUE)
+  )
+pgs_long <- pgs_shot_dist_summary %>%
+  pivot_longer(
+    cols = starts_with("pct_"),
+    names_to = "ShotZone",
+    values_to = "FGA_pct"
+  )
+pgs_long$ShotZone <- recode(pgs_long$ShotZone,
+                            pct_0_3 = "0-3 ft",
+                            pct_3_10 = "3-10 ft",
+                            pct_10_16 = "10-16 ft",
+                            pct_16_3P = "16 ft - 3P",
+                            pct_3P = "3P")
+pgs_long$ShotZone <- factor(pgs_long$ShotZone,
+                            levels = c("0-3 ft", "3-10 ft", "10-16 ft", "16 ft - 3P", "3P"))
+
+ggplot(pgs_long, aes(x = Year, y = FGA_pct, color = ShotZone, group = ShotZone)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(title = "Average FGA% by Shot Distance (PGs)",
+       x = "Season",
+       y = "Average FGA%",
+       color = "Shot Distance") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust=0.5, face='bold', size=18),
+    axis.title.x = element_text(face='bold', size=14),
+    axis.title.y = element_text(face='bold', size=14),
+    axis.text.x = element_text(size=10),
+    axis.text.y = element_text(size=10),
+    legend.title = element_text(hjust=0.5, face='bold', size=14),
+    legend.text = element_text(hjust=0.5, size=10)
+  )
+```
+
+#salaries
+```{r}
+salaries_24 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 1)
+salaries_23 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 2)
+salaries_22 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 3)
+salaries_21 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 4)
+salaries_20 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/PlayerSalaries.xlsx', sheet = 5)
+```
+
+#evolution of PG salaries
+```{r}
+salaries_20 <- salaries_20 %>% mutate(Year = "2019-20") %>% rename(Player = player)
+salaries_21 <- salaries_21 %>% mutate(Year = "2020-21") %>% rename(Player = player)
+salaries_22 <- salaries_22 %>% mutate(Year = "2021-22") %>% rename(Player = player)
+salaries_23 <- salaries_23 %>% mutate(Year = "2022-23") %>% rename(Player = player)
+salaries_24 <- salaries_24 %>% mutate(Year = "2023-24") %>% rename(Player = player)
+salaries_data <- salaries_data %>% mutate(Year = "2024-25")
+normalize_names <- function(df) {
+  df %>% mutate(Player = stri_trans_general(Player, "Latin-ASCII"))
+}
+salaries_20 <- normalize_names(salaries_20)
+salaries_21 <- normalize_names(salaries_21)
+salaries_22 <- normalize_names(salaries_22)
+salaries_23 <- normalize_names(salaries_23)
+salaries_24 <- normalize_names(salaries_24)
+salaries_data <- normalize_names(salaries_data)
+all_pg_shooting <- normalize_names(all_pg_shooting)
+salaries_all_yrs <- bind_rows(
+  salaries_20 %>% select(Player, Year, salary),
+  salaries_21 %>% select(Player, Year, salary),
+  salaries_22 %>% select(Player, Year, salary),
+  salaries_23 %>% select(Player, Year, salary),
+  salaries_24 %>% select(Player, Year, salary),
+  salaries_data %>% select(Player, Year, salary=`2024-25`)
+)
+all_pg_shooting <- all_pg_shooting %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+all_pg_shooting_salaries <- all_pg_shooting %>% filter(!is.na(salary))
+
+plot_data <- all_pg_shooting_salaries %>%
+  filter(Year != "2024-25")
+ggplot(plot_data, aes(x = Year, y = salary)) +
+  geom_boxplot(fill = "lightblue", outlier.shape = 16, outlier.size = 1.5) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(
+    title = "Point Guard Salaries by Season",
+    x = "Season",
+    y = "Salary"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    axis.title.y = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold')
+  ) +
+  coord_cartesian(ylim = c(0, 50000000))
+```
+
+```{r}
+pos_salaries_20 <- salaries_20 %>%
+  left_join(shooting_data20 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_21 <- salaries_21 %>%
+  left_join(shooting_data21 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_22 <- salaries_22 %>%
+  left_join(shooting_data22 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_23 <- salaries_23 %>%
+  left_join(shooting_data23 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_24 <- salaries_24 %>%
+  left_join(shooting_data24 %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries_25 <- salaries_data %>%
+  left_join(shooting_data %>% select(Player, Pos), by = "Player") %>%
+  select(Player, Pos, Year, salary=`2024-25`) %>%
+  unique() %>%
+  filter(!is.na(Pos))
+pos_salaries <- bind_rows(pos_salaries_20, pos_salaries_21, pos_salaries_22, pos_salaries_23, pos_salaries_24, pos_salaries_25)
+
+summary_by_year <- pos_salaries %>%
+  group_by(Pos, Year) %>%
+  summarise(
+    avg_salary = mean(salary, na.rm = TRUE),
+    median_salary = median(salary, na.rm = TRUE),
+    iqr = IQR(salary, na.rm = TRUE),
+    variance = var(salary, na.rm = TRUE),
+    max_salary = max(salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+iqr_trend <- summary_by_year %>%
+  select(Pos, Year, iqr) %>%
+  pivot_wider(names_from = Year, values_from = iqr) %>%
+  nest(IQR_Trend = -Pos)
+variance_trend <- summary_by_year %>%
+  select(Pos, Year, variance) %>%
+  pivot_wider(names_from = Year, values_from = variance) %>%
+  nest(Variance_Trend = -Pos)
+summary_snapshot <- summary_by_year %>%
+  filter(Year %in% c("2019-20", "2024-25")) %>%
+  select(Pos, Year, avg_salary, median_salary, max_salary) %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = c(avg_salary, median_salary, max_salary),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    pct_growth = 100 * (`avg_salary_2024-25` - `avg_salary_2019-20`) / `avg_salary_2019-20`
+  )
+final_gt_data <- summary_snapshot %>%
+  left_join(iqr_trend, by = "Pos") %>%
+  left_join(variance_trend, by = "Pos") %>%
+  mutate(
+    `avg_salary_2024-25` = round(`avg_salary_2024-25` / 1e6,3),
+    `median_salary_2024-25` = round(`median_salary_2024-25` / 1e6,3),
+    `max_salary_2024-25` = round(`max_salary_2024-25` / 1e6,3)
+  ) %>%
+  select(
+    Pos,
+    `avg_salary_2024-25`,
+    pct_growth,
+    `median_salary_2024-25`,
+    IQR_Trend,
+    `max_salary_2024-25`,
+    Variance_Trend
+  )
+final_gt_data <- final_gt_data %>%
+  mutate(Pos = factor(Pos, levels = c("PG", "SG", "SF", "PF", "C"))) %>%
+  arrange(Pos)
+
+title_header <- glue(
+  "<div style='display: flex; align-items: center; justify-content: space-between;'>
+    <div style='text-align: left;'>
+      <img src='https://upload.wikimedia.org/wikipedia/en/thumb/0/03/National_Basketball_Association_logo.svg/120px-National_Basketball_Association_logo.svg.png' style='height: 70px; width: auto; border-radius: 5px;'>
+    </div>
+    <div style='text-align: center; flex-grow: 1;'>
+      <span style='font-family: Arial, sans-serif; font-size: 24px; font-weight: bold; text-decoration: underline;'>Salary Trends by Position</span><br>
+      <span style='font-family: Arial, sans-serif; font-size: 22px; font-weight: bold;'>2019–25</span>
+    </div>
+  </div>"
+)
+gt(final_gt_data) %>%
+  fmt_currency(columns = c(`avg_salary_2024-25`, `median_salary_2024-25`, `max_salary_2024-25`)) %>%
+  fmt_number(columns = pct_growth, decimals = 1, suffixing = TRUE) %>%
+  gt_plt_sparkline(IQR_Trend, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_sparkline(Variance_Trend, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  cols_label(Pos = "Position", `avg_salary_2024-25` = "Avg Salary", pct_growth = "% Growth", `median_salary_2024-25` = "Median", IQR_Trend = "IQR Trend", `max_salary_2024-25` = "Top Earner", Variance_Trend = "Variance Trend") %>%
+  tab_style(style = cell_text(align = 'center', weight = 'bold', decorate = 'underline'), locations = cells_column_labels()) %>%
+  tab_style(style = cell_text(align = 'center', weight = 'bold'), locations = cells_body(columns = c(Pos))) %>%
+  tab_footnote(footnote = "in millions (2024-25)", locations = cells_column_labels(columns = c(`avg_salary_2024-25`, `median_salary_2024-25`, `max_salary_2024-25`))) %>%
+  tab_footnote(footnote = "2019-24", locations = cells_column_labels(columns = c(pct_growth))) %>%
+  gt_add_divider(Pos, weight = px(1.5)) %>%
+  gt_add_divider(columns = c(`avg_salary_2024-25`,pct_growth,`median_salary_2024-25`,IQR_Trend,`max_salary_2024-25`,Variance_Trend), weight = px(0.5)) %>%
+  tab_header(title = html(title_header))
+```
+
+
+```{r}
+corr_data <- all_pg_shooting_salaries %>%
+  mutate(log_salary = log(salary)) %>%
+  select(log_salary, all_of(names(.)[9:24]), all_of(names(.)[27:28])) %>%
+  mutate(across(everything(), as.numeric))
+cor_results <- sapply(corr_data[-1], function(x) cor(x, corr_data$log_salary, use = "complete.obs"))
+cor_df <- data.frame(
+  Variable = names(cor_results),
+  Correlation = round(cor_results, 3)
+) %>%
+  arrange(desc(abs(Correlation)))
+
+cor_heatmap <- cor_df %>%
+  mutate(
+    Variable = recode(Variable,
+      "FG." = "FG%",
+      "FG.3.10" = "FG% (3-10 ft)",
+      "FG.2p" = "FG% (2PT)",
+      "FG.0.3" = "FG% (0-3 ft)",
+      "FG.3P" = "FG% (3PT)",
+      "FGA.10.16" = "FGA% (10-16 ft)",
+      "Corner3P." = "Corner 3PT%",
+      "FGA.16.3P" = "FGA% (16ft–3PT)",
+      "FG.10.16" = "FG% (10-16 ft)",
+      "FGA.2p" = "FGA% (2PT)",
+      "FG.16.3P" = "FG% (16ft–3PT)",
+      "FGA.3.10" = "FGA% (3-10 ft)",
+      "Dist." = "Avg Shot Dist",
+      "FGA.0.3" = "FGA% (0-3 ft)",
+      "FGA.3P" = "FGA% (3PT)",
+      "FG.2P_ast" = "%Assisted 2PT",
+      "Corner3PA." = "Corner 3PA%",
+      "FG.3P_ast" = "%Assisted 3PT"
+    )
+  )
+cor_heatmap <- cor_heatmap %>%
+  mutate(Variable = factor(Variable, levels = Variable[order(Correlation)]))
+ggplot(cor_heatmap, aes(x = "", y = Variable, fill = Correlation)) +
+  geom_tile() +
+  geom_text(aes(label = Correlation), color = "black", fontface = 'bold') +
+  scale_fill_gradient2(low = "red", mid = "white", high = "blue", midpoint = 0) +
+  labs(title = "Correlation with Salary", 
+       subtitle = "Each value represents the correlation strength (r) between the metric and log(salary)",
+       x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.subtitle = element_text(hjust = 0.5, face = 'italic', size = 12))
+```
+
+
+```{r}
+url <- 'https://www.basketball-reference.com/leagues/NBA_2024_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data24 <- data.frame(web[1])
+advanced_data24 <- advanced_data24[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2023_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data23 <- data.frame(web[1])
+advanced_data23 <- advanced_data23[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2022_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data22 <- data.frame(web[1])
+advanced_data22 <- advanced_data22[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2021_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data21 <- data.frame(web[1])
+advanced_data21 <- advanced_data21[,-1]
+
+url <- 'https://www.basketball-reference.com/leagues/NBA_2020_advanced.html'
+web <- read_html(url) %>% html_table()
+advanced_data20 <- data.frame(web[1])
+advanced_data20 <- advanced_data20[,-1]
+
+# write.csv(advanced_data24, file = '23-24 Advanced Data.csv')
+# write.csv(advanced_data23, file = '22-23 Advanced Data.csv')
+# write.csv(advanced_data22, file = '21-22 Advanced Data.csv')
+# write.csv(advanced_data21, file = '20-21 Advanced Data.csv')
+# write.csv(advanced_data20, file = '19-20 Advanced Data.csv')
+```
+
+
+```{r}
+advanced_data20_pgs <- advanced_data20 %>%
+  mutate(Year = "2019-20") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data21_pgs <- advanced_data21 %>%
+  mutate(Year = "2020-21") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data22_pgs <- advanced_data22 %>%
+  mutate(Year = "2021-22") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data23_pgs <- advanced_data23 %>%
+  mutate(Year = "2022-23") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data24_pgs <- advanced_data24 %>%
+  mutate(Year = "2023-24") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+advanced_data_pgs <- advanced_data %>%
+  mutate(Year = "2024-25") %>%
+  filter(str_detect(Pos, "PG"), as.numeric(G) >= 15, as.numeric(MP) >= 200)
+all_pg_advanced <- bind_rows(
+  advanced_data20_pgs,
+  advanced_data21_pgs,
+  advanced_data22_pgs,
+  advanced_data23_pgs,
+  advanced_data24_pgs,
+  advanced_data_pgs
+)
+all_pg_advanced <- all_pg_advanced %>%
+  left_join(salaries_all_yrs, by = c("Player", "Year"))
+all_pg_advanced_salaries <- all_pg_advanced %>% filter(!is.na(salary))
+
+corr_data1 <- all_pg_advanced_salaries %>%
+  mutate(log_salary = log(salary)) %>%
+  select(log_salary, all_of(names(.)[9:19])) %>%
+  mutate(across(everything(), as.numeric))
+cor_results1 <- sapply(corr_data1[-1], function(x) cor(x, corr_data1$log_salary, use = "complete.obs"))
+cor_df1 <- data.frame(
+  Variable = names(cor_results1),
+  Correlation = round(cor_results1, 3)
+) %>%
+  arrange(desc(abs(Correlation)))
+
+cor_heatmap1 <- cor_df1 %>%
+  mutate(
+    Variable = recode(Variable,
+      "TOV." = "TOV%",
+      "XP3AR" = "3PAr",
+      "STL." = "STL%",
+      "ORB." = "ORB%",
+      "BLK." = "BLK%",
+      "TRB." = "TRB%",
+      "DRB." = "DRB%",
+      "FTr" = "FTAr",
+      "TS." = "TS%",
+      "AST." = "AST%",
+      "USG." = "USG%"
+    )
+  )
+cor_heatmap1 <- cor_heatmap1 %>%
+  mutate(Variable = factor(Variable, levels = Variable[order(Correlation)]))
+ggplot(cor_heatmap1, aes(x = "", y = Variable, fill = Correlation)) +
+  geom_tile() +
+  geom_text(aes(label = Correlation), color = "black", fontface = 'bold') +
+  scale_fill_gradient2(low = "red", mid = "white", high = "blue", midpoint = 0) +
+  labs(title = "Correlation with Salary", 
+       subtitle = "Each value represents the correlation strength (r) between the metric and log(salary)",
+       x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', size = 18),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(face = 'bold', size = 14),
+    legend.title = element_text(hjust = 0.5, face = 'bold'),
+    plot.subtitle = element_text(hjust = 0.5, face = 'italic', size = 12))
+```
+
+```{r}
+joined_pg_data <- all_pg_advanced_salaries %>%
+  select(Player, Year, USG. = USG., TS. = TS., AST. = AST., FTr = FTr, DRB. = DRB.) %>%
+  left_join(
+    all_pg_shooting_salaries %>%
+      select(Player, Year, FG. = `FG%`, `FG.3.10` = `FG.3-10`, FG.2p = FG.2p,
+             `Corner3PA.` = Corner3PA., `FG.3P_ast` = FG.3P_ast),
+    by = c("Player", "Year")
+  ) %>%
+  unique() %>%
+  mutate(across(3:12, ~ as.numeric(.)), .keep = "all") %>%
+  mutate(
+    TS. = TS.*100,
+    FTr = FTr*100,
+    FG. = FG.*100,
+    FG.3.10 = FG.3.10*100,
+    FG.2p = FG.2p*100,
+    Corner3PA. = Corner3PA.*100,
+    FG.3P_ast = FG.3P_ast*100
+  )
+
+selected_stats <- c("FG.", "FG.3.10", "FG.2p", "Corner3PA.", "FG.3P_ast",
+                    "USG.", "TS.", "AST.", "FTr", "DRB.")
+pg_long <- joined_pg_data %>%
+  select(Player, Year, all_of(selected_stats)) %>%
+  pivot_longer(cols = -c(Player, Year), names_to = "Stat", values_to = "Value") %>%
+  mutate(Value = as.numeric(Value))
+pg_summary <- pg_long %>%
+  group_by(Stat, Year) %>%
+  summarise(
+    Mean = mean(Value, na.rm = TRUE),
+    SD = sd(Value, na.rm = TRUE),
+    IQR = IQR(Value, na.rm = TRUE),
+    Dist = list(Value[Year == "2024-25"]),
+    .groups = "drop"
+  )
+wide_summary <- pg_summary %>%
+  group_by(Stat) %>%
+  summarise(
+    `2019-20 Avg` = round(Mean[Year == "2019-20"],1),
+    `2024-25 Avg` = round(Mean[Year == "2024-25"],1),
+    `Overall Std. Dev` = round(sd(Mean, na.rm = TRUE),2),
+    `Avg % Increase Per Year` = round(((Mean[Year == "2024-25"] - Mean[Year == "2019-20"]) /
+                                Mean[Year == "2019-20"] / (length(unique(pg_summary$Year)) - 1))*100,2),
+    `IQR Trend` = list(IQR),
+    `Std. Dev % Increase` = round(((SD[Year == "2024-25"] - SD[Year == "2019-20"]) / SD[Year == "2019-20"])*100,1),
+    `SD Trend` = list(SD),
+    `2024-25 Distribution` = pg_summary$Dist[pg_summary$Year == "2024-25" & pg_summary$Stat == unique(Stat)],
+    .groups = "drop"
+  )
+wide_summary <- wide_summary %>%
+  mutate(
+    Stat = recode(Stat,
+      "FG." = "FG%",
+      "FG.3.10" = "FG% (3-10 ft)",
+      "FG.2p" = "FG% (2PT)",
+      "Corner3PA." = "Corner 3PA%",
+      "FG.3P_ast" = "%Assisted 3PT",
+      "USG." = "USG%",
+      "TS." = "TS%",
+      "AST." = "AST%",
+      "FTr" = "FTAr",
+      "DRB." = "DRB%"
+    )
+  ) %>%
+  arrange(Stat)
+
+title_header <- glue(
+  "<div style='display: flex; align-items: center; justify-content: space-between;'>
+    <div style='text-align: left;'>
+      <img src='https://upload.wikimedia.org/wikipedia/en/thumb/0/03/National_Basketball_Association_logo.svg/120px-National_Basketball_Association_logo.svg.png' style='height: 70px; width: auto; border-radius: 5px;'>
+    </div>
+    <div style='text-align: center; flex-grow: 1;'>
+      <span style='font-family: Arial, sans-serif; font-size: 24px; font-weight: bold; text-decoration: underline;'>Salary Correlated Metric Trends</span><br>
+      <span style='font-family: Arial, sans-serif; font-size: 22px; font-weight: bold;'>2019–25</span>
+    </div>
+  </div>"
+)
+gt(wide_summary) %>%
+  cols_label(Stat = "Stat", `2019-20 Avg` = "2019–20 Avg", `2024-25 Avg` = "2024–25 Avg", `Overall Std. Dev` = "Overall St Dev", `Avg % Increase Per Year` = "% Increase/Yr", `IQR Trend` = "IQR Trend", `Std. Dev % Increase` = "St Dev % Increase", `SD Trend` = "St Dev Trend", `2024-25 Distribution` = "2024–25 Distribution") %>%
+  gt_plt_sparkline(`IQR Trend`, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_sparkline(`SD Trend`, same_limit = TRUE, type = "default", palette = c('black', 'black','blue','red','black')) %>%
+  gt_plt_dist(`2024-25 Distribution`, type = "density", line_color = 'grey', fill_color = 'black') %>%
+  tab_style(style = list(cell_text(align = "center", weight = "bold", decorate = "underline", size = 12)), locations = cells_column_labels(everything())) %>%
+  tab_style(style = list(cell_text(align = "left", weight = "bold", size=12)), locations = cells_body(columns = Stat)) %>%
+  tab_style(style = cell_text(align = "right", size=12), locations = cells_body(c(-Stat))) %>%
+  gt_add_divider(Stat, weight = px(1)) %>%
+  tab_header(title = html(title_header))
+```
+
+#nba data
+```{r}
+nba_data_25 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 1)
+nba_data_24 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 2)
+nba_data_23 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 3)
+nba_data_22 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 4)
+nba_data_21 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 5)
+nba_data_20 <- read_excel(path = '/Users/gregorylederer/Desktop/NBA Project/OtherPlayerStats.xlsx', sheet = 6)
+```
+
+#start model
+```{r}
+nba_data_25 <- nba_data_25 %>% mutate(Year = '2024-25', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_24 <- nba_data_24 %>% mutate(Year = '2023-24', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_23 <- nba_data_23 %>% mutate(Year = '2022-23', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_22 <- nba_data_22 %>% mutate(Year = '2021-22', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_21 <- nba_data_21 %>% mutate(Year = '2020-21', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+nba_data_20 <- nba_data_20 %>% mutate(Year = '2019-20', PIE = as.numeric(PIE)) %>% dplyr::select(PLAYER, Year, PIE, POSS, TEAM)
+all_nba_data <- rbind(nba_data_25, nba_data_24, nba_data_23, nba_data_22, nba_data_21, nba_data_20) %>% rename(Player = PLAYER)
+all_nba_data <- normalize_names(all_nba_data)
+
+adv_selected1 <- all_pg_advanced_salaries %>%
+  group_by(Player, Year) %>%
+  slice_max(G, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(Player, Year, salary, TS., X3PAr, FTr, ORB., DRB., TRB., AST., STL., BLK., TOV., USG., OBPM, DBPM, BPM, Age)
+shooting_selected1 <- all_pg_shooting %>%
+  group_by(Player, Year) %>%
+  slice_max(G, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(Player, Year, FG. = `FG%`, Dist., FGA.2p, FGA.0.3 = `FGA.0-3`, FGA.3.10 = `FGA.3-10`, 
+         FGA.10.16 = `FGA.10-16`, FGA.16.3P = `FGA.16-3P`, FGA.3P, 
+         FG.2p, FG.0.3 = `FG.0-3`, FG.3.10 = `FG.3-10`, FG.10.16 = `FG.10-16`, 
+         FG.16.3P = `FG.16-3P`, FG.3P, FG.2P_ast, FG.3P_ast, Corner3PA., Corner3P.)
+
+model_data1 <- all_nba_data %>%
+  inner_join(adv_selected1, by = c("Player", "Year")) %>%
+  inner_join(shooting_selected1, by = c("Player", "Year")) %>%
+  unique() %>%
+  mutate(across(.cols = -c(Player, Year, TEAM), .fns = ~ as.numeric(.)))
+model_data1.1 <- model_data1 %>% drop_na()
+
+set.seed(123)
+n <- nrow(model_data1.1)
+train_index <- sample(seq_len(n), size = 0.8 * n)
+train_data <- model_data1.1[train_index, ]
+test_data <- model_data1.1[-train_index, ]
+
+model <- lm(salary~OBPM+Age*USG.+POSS+FGA.16.3P+FGA.2p+FTr+FG.3.10+FG.3P+FG.2P_ast+FG.2p+BLK.+TOV., data = train_data)
+summary(model)
+
+test_data$pred_salary <- predict(model, newdata = test_data)
+mean(abs(test_data$salary - test_data$pred_salary))
+
+vif(model)
+
+#-- no outliers
+
+influence <- influence.measures(model)
+train_data$leverage <- hatvalues(model)
+train_data$cooks_d <- cooks.distance(model)
+train_data$std_resid <- rstandard(model)
+
+leverage_cutoff <- 2 * (length(model$coefficients)) / nrow(train_data)
+cooks_cutoff <- 4 / nrow(train_data)
+train_data_clean <- train_data %>%
+  filter(leverage < leverage_cutoff,
+         cooks_d < cooks_cutoff,
+         abs(std_resid) < 3)
+
+model_clean <- lm(salary~OBPM+Age*USG.+POSS+FGA.16.3P+FGA.2p+FTr+FG.3.10+FG.3P+FG.2P_ast+FG.2p+BLK.+TOV., 
+                  data = train_data_clean)
+
+summary(model_clean)
+vif(model_clean)
+test_data$pred_salary_clean <- predict(model_clean, newdata = test_data)
+mean(abs(test_data$salary - test_data$pred_salary_clean))
+
+#-- ptiles w/wout outliers
+
+model_data1.2 <- model_data1 %>%
+  drop_na() %>%
+  mutate(salary_ptile = percent_rank(salary)) %>%
+  dplyr::select(-Player, -TEAM, -Year, -salary)
+n2 <- nrow(model_data1.2)
+train_index2 <- sample(seq_len(n2), size = 0.8 * n2)
+train_data2 <- model_data1.2[train_index2, ]
+test_data2 <- model_data1.2[-train_index2, ]
+model_ptile <- lm(salary_ptile~POSS+Age+USG.+DBPM+FGA.3.10+FG.3.10+BLK.+AST., data = train_data2)
+summary(model_ptile)
+test_data2$pred_salary_ptile <- predict(model_ptile, newdata = test_data2)
+test_data2 <- test_data2 %>% mutate(pred_salary_ptile = percent_rank(pred_salary_ptile))
+mean(abs(test_data2$salary_ptile - test_data2$pred_salary_ptile))
+
+ggplot(test_data2, aes(x = salary_ptile, y = pred_salary_ptile_clean)) +
+  geom_point(color = "steelblue", alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed") +
+  labs(title = "Predicted vs Actual Salary Percentile",
+       x = "Actual Salary Percentile",
+       y = "Predicted Salary Percentile") +
+  theme_minimal()
+
+train_data2_diag <- train_data2 %>%
+  mutate(
+    leverage = hatvalues(model_ptile),
+    cooks_d = cooks.distance(model_ptile),
+    std_resid = rstandard(model_ptile)
+  )
+leverage_thresh <- 2 * (length(coef(model_ptile)) / nrow(train_data2_diag))
+cooks_thresh <- 4 / nrow(train_data2_diag)
+train_data2_clean <- train_data2_diag %>%
+  filter(
+    leverage < leverage_thresh,
+    cooks_d < cooks_thresh,
+    abs(std_resid) < 3,
+  )
+
+model_ptile_clean <- lm(salary_ptile ~ POSS + Age + USG. + DBPM + FGA.3.10 + FG.3.10 + BLK. + AST., 
+                        data = train_data2_clean)
+summary(model_ptile_clean)
+test_data2$pred_salary_ptile_clean <- predict(model_ptile_clean, newdata = test_data2)
+mean(abs(test_data2$salary_ptile - test_data2$pred_salary_ptile_clean))
+
+#-- log salary and clean
+
+model_data2 <- model_data1 %>% dplyr::select(-Player, -TEAM, -Year) %>% drop_na() %>% mutate(salary = log(salary))
+n3 <- nrow(model_data2)
+train_index3 <- sample(seq_len(n3), size = 0.8 * n3)
+train_data3 <- model_data2[train_index3, ]
+test_data3 <- model_data2[-train_index3, ]
+
+model2 <- lm(salary ~ POSS + Age + USG. + DBPM + FGA.0.3 + ORB. + FGA.3.10 + Dist. + FTr + FG.3.10, data = train_data3)
+summary(model2)
+
+train_data3_diag <- train_data3 %>%
+  mutate(
+    leverage = hatvalues(model2),
+    cooks_d = cooks.distance(model2),
+    std_resid = rstandard(model2)
+  )
+leverage_thresh <- 2 * (length(coef(model2)) / nrow(train_data3_diag))
+cooks_thresh <- 4 / nrow(train_data3_diag)
+train_data3_clean <- train_data3_diag %>%
+  filter(leverage < leverage_thresh,
+         cooks_d < cooks_thresh,
+         abs(std_resid) < 3)
+
+model2_clean <- lm(salary ~ log(POSS) + Age * USG. + DBPM + FGA.0.3 + ORB. + FGA.3.10 + FG.3.10 + FTr+ Dist., data = train_data3_clean)
+summary(model2_clean)
+test_data3$pred_salary_clean <- predict(model2_clean, newdata = test_data3)
+mean(abs(test_data3$salary - test_data3$pred_salary_clean))
+```
+
